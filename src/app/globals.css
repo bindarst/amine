@@ -204,13 +204,7 @@
   
   .animate-shimmer {
     animation: shimmer 2s infinite linear;
-    background: linear-gradient(
-      to right,
-      transparent 0%,
-      rgba(255, 255, 255, 0.1) 50%,
-      transparent 100%
-    );
-    background-size: 1000px 100%;
+    background: hsl(var(--muted));
   }
   
   /* Effets de glassmorphism */
@@ -254,15 +248,11 @@
   
   /* Gradient moderne */
   .gradient-primary {
-    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.8) 100%);
+    background: hsl(var(--primary));
   }
   
   .gradient-mesh {
-    background: 
-      radial-gradient(at 0% 0%, hsl(var(--primary) / 0.1) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, hsl(var(--chart-2) / 0.1) 0px, transparent 50%),
-      radial-gradient(at 100% 100%, hsl(var(--chart-3) / 0.1) 0px, transparent 50%),
-      radial-gradient(at 0% 100%, hsl(var(--chart-4) / 0.1) 0px, transparent 50%);
+    background: hsl(var(--background));
   }
   
   /* Ombres modernes */
@@ -307,10 +297,7 @@
     inset: 0;
     border-radius: var(--radius);
     padding: 1px;
-    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--chart-2)));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
+    border: 1px solid hsl(var(--primary));
     opacity: 0;
     transition: opacity 0.3s ease;
   }
@@ -330,10 +317,7 @@
     inset: -2px;
     border-radius: calc(var(--radius) + 2px);
     padding: 2px;
-    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--chart-2)));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
+    border: 2px solid hsl(var(--primary));
     opacity: 0;
     transition: opacity 0.2s ease;
     pointer-events: none;
@@ -398,4 +382,66 @@
   .animate-slide-in-up {
     animation: slide-in-up 0.5s ease-out;
   }
+}
+
+/* Politique visuelle sobre : aucun degrade dans l'interface. */
+:is(
+  [class*="bg-gradient-to-"],
+  [class*="bg-[linear-gradient"],
+  [class*="bg-[radial-gradient"],
+  [class*="bg-[conic-gradient"]
+) {
+  background-image: none !important;
+}
+
+:is(
+  [class*="bg-gradient-to-"],
+  [class*="bg-[linear-gradient"],
+  [class*="bg-[radial-gradient"],
+  [class*="bg-[conic-gradient"]
+)::before,
+:is(
+  [class*="bg-gradient-to-"],
+  [class*="bg-[linear-gradient"],
+  [class*="bg-[radial-gradient"],
+  [class*="bg-[conic-gradient"]
+)::after {
+  background-image: none !important;
+}
+
+:is([class*="bg-gradient-to-"])[class~="from-primary"],
+:is([class*="bg-gradient-to-"])[class~="from-accent"] {
+  background-color: hsl(var(--primary)) !important;
+}
+
+:is([class*="bg-gradient-to-"])[class~="from-violet-400"],
+:is([class*="bg-gradient-to-"])[class~="from-violet-500"],
+:is([class*="bg-gradient-to-"])[class~="from-violet-600"] {
+  background-color: rgb(124 58 237) !important;
+}
+
+:is([class*="bg-gradient-to-"])[class~="from-sky-400"],
+:is([class*="bg-gradient-to-"])[class~="from-sky-500"],
+:is([class*="bg-gradient-to-"])[class~="from-cyan-400"] {
+  background-color: rgb(14 165 233) !important;
+}
+
+:is([class*="bg-gradient-to-"])[class~="from-emerald-400"],
+:is([class*="bg-gradient-to-"])[class~="from-emerald-500"] {
+  background-color: rgb(16 185 129) !important;
+}
+
+:is([class*="bg-gradient-to-"])[class~="from-rose-400"],
+:is([class*="bg-gradient-to-"])[class~="from-rose-500"] {
+  background-color: rgb(244 63 94) !important;
+}
+
+:is([class*="bg-gradient-to-"])[class~="from-muted"] {
+  background-color: hsl(var(--muted)) !important;
+}
+
+.bg-clip-text.text-transparent {
+  background: none !important;
+  color: hsl(var(--foreground)) !important;
+  -webkit-text-fill-color: currentColor;
 }

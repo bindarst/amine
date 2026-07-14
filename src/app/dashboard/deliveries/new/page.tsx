@@ -551,19 +551,13 @@ export default function NewDeliveryPage() {
                 onTouchMove={(e) => handleTouchMove(e, diaper.id)}
                 onTouchEnd={handleTouchEnd}
               >
-                {/* Colored Header with Gradient */}
+                {/* En-tete colore avec une teinte unie propre a l'article. */}
                 <div
                   className="relative p-4 overflow-hidden"
                   style={{
-                    background: `linear-gradient(135deg, ${diaper.hexColor} 0%, ${diaper.hexColor}dd 100%)`
+                    backgroundColor: diaper.hexColor
                   }}
                 >
-                  {/* Subtle pattern */}
-                  <div className="absolute inset-0 opacity-10" style={{
-                    backgroundImage: 'radial-gradient(circle at 20% 50%, white 1px, transparent 1px)',
-                    backgroundSize: '20px 20px'
-                  }} />
-
                   <div className="relative flex items-center justify-between">
                     <span className="font-bold text-lg text-white drop-shadow-md">{diaper.name}</span>
 
