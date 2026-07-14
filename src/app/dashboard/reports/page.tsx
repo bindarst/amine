@@ -10,7 +10,6 @@ import { useItems } from "../settings/items-context";
 import { useWards } from '../settings/wards-context';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import html2canvas from 'html2canvas';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ConsumptionChart from './components/consumption-chart';
 import WardDistributionChart from './components/ward-distribution-chart';
@@ -280,99 +279,359 @@ export default function ReportsPage() {
   }, [filteredOrders, directDistributions, diapers, wards, isLoading, detailedAdjustments]);
 
   const handleExportPDF = async () => {
-    const doc = new jsPDF();
-    let yPosition = 22;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 12;
+    const contentWidth = pageWidth - margin * 2;
+    const primary: [number, number, number] = [14, 165, 233];
+    const ink: [number, number, number] = [24, 31, 42];
+    let y = 18;
 
-    doc.setFontSize(18);
-    doc.text("Rapport d'Analyse des Commandes", 14, yPosition);
-    yPosition += 6;
-    doc.setFontSize(11);
-    doc.setTextColor(100);
-    doc.text(`Généré le: ${new Date().toLocaleDateString('fr-FR')}`, 14, yPosition);
-    yPosition += 6;
-    if (date?.from) {
-      doc.text(
-        `Période: du ${format(date.from, 'dd/MM/yyyy')} au ${date.to ? format(date.to, 'dd/MM/yyyy') : format(date.from, 'dd/MM/yyyy')}`,
-        14, yPosition
-      );
-    }
-    yPosition += 16;
-
-    doc.setFontSize(14);
-    doc.setTextColor(0);
-    doc.text("Résumé Statistique", 14, yPosition);
-    yPosition += 5;
-
-    const summaryData = [
-      ["Distributions directes", statsData.totalDirectDistributions.toLocaleString('fr-FR')],
-      ["Consommation Moy./Semaine", `${statsData.avgConsumption.toLocaleString('fr-FR')} pièces`],
-      ["Article le Plus Populaire", statsData.mostOrderedItem],
-      ["Total des Articles Manquants", statsData.totalMissing.toLocaleString('fr-FR')],
-      ["Top Article Manquant", statsData.mostMissingItem],
-    ];
-
-    autoTable(doc, {
-      startY: yPosition,
-      head: [['Indicateur', 'Valeur']],
-      body: summaryData,
-      theme: 'striped',
-    });
-
-    yPosition = (doc as any).lastAutoTable.finalY + 15;
-
-    // Add charts
-    const chartElements = [
-      { el: chartRefs.consumptionOverTime.current, title: "Consommation au Fil du Temps" },
-      { el: chartRefs.wardDistribution.current, title: "Répartition par Étage" },
-      { el: chartRefs.consumption.current, title: "Top 10 Articles Consommés" }
-    ];
-
-    for (const chart of chartElements) {
-      if (chart.el) {
-        if (yPosition + 100 > doc.internal.pageSize.getHeight() - 20) {
-          doc.addPage();
-          yPosition = 20;
-        }
-
-        doc.setFontSize(14);
-        doc.text(chart.title, 14, yPosition);
-        yPosition += 10;
-
-        const canvas = await html2canvas(chart.el, { useCORS: true, backgroundColor: null, scale: 2 });
-        const imgData = canvas.toDataURL('image/png');
-        const imgProps = doc.getImageProperties(imgData);
-        const pdfWidth = doc.internal.pageSize.getWidth() - 28;
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-        doc.addImage(imgData, 'PNG', 14, yPosition, pdfWidth, pdfHeight);
-        yPosition += pdfHeight + 15;
-      }
-    }
-
-    // Add Adjustments Table
-    if (detailedAdjustments.length > 0) {
-      if (yPosition + 50 > doc.internal.pageSize.getHeight() - 20) {
+    const ensureSpace = (height: number) => {
+      if (y + height > pageHeight - 15) {
         doc.addPage();
-        yPosition = 20;
+        y = 16;
       }
-      doc.setFontSize(16);
-      doc.text("Historique des Ajustements Manuels", 14, yPosition);
-      yPosition += 10;
+    };
+
+    const addSection = (title: string, subtitle?: string) => {
+      ensureSpace(subtitle ? 18 : 12);
+      doc.setTextColor(...ink);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.text(title, margin, y);
+      doc.setDrawColor(...primary);
+      doc.setLineWidth(0.7);
+      doc.line(margin, y + 2.5, margin + 28, y + 2.5);
+      y += 7;
+      if (subtitle) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(100, 108, 120);
+        doc.text(subtitle, margin, y);
+        y += 6;
+      }
+    };
+
+    const addTable = (head: string[], body: (string | number)[][], widths?: Record<number, number>) => {
       autoTable(doc, {
-        startY: yPosition,
-        head: [['Date', 'Article', 'Utilisateur', 'Avant', 'Après', 'Écart']],
-        body: detailedAdjustments.map(adj => [
-          new Date(adj.date.toDate()).toLocaleString('fr-FR'),
-          adj.itemName,
-          adj.userName,
-          adj.data.oldQuantity.toString(),
-          adj.data.newQuantity.toString(),
-          adj.difference > 0 ? `+${adj.difference}` : adj.difference.toString(),
-        ]),
+        startY: y,
+        head: [head],
+        body,
+        margin: { left: margin, right: margin },
+        theme: 'grid',
+        styles: { fontSize: 7.2, cellPadding: 1.6, overflow: 'linebreak', textColor: ink },
+        headStyles: { fillColor: primary, textColor: 255, fontStyle: 'bold', lineColor: primary },
+        alternateRowStyles: { fillColor: [245, 248, 250] },
+        columnStyles: Object.fromEntries(
+          Object.entries(widths || {}).map(([column, width]) => [column, { cellWidth: width }])
+        ),
       });
+      y = (doc as any).lastAutoTable.finalY + 8;
+    };
+
+    const addBarChart = (
+      title: string,
+      values: { name: string; value: number }[],
+      color: [number, number, number]
+    ) => {
+      const data = values.slice(0, 10);
+      const chartHeight = 16 + data.length * 6.5;
+      ensureSpace(chartHeight);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(...ink);
+      doc.text(title, margin, y);
+      y += 6;
+      if (data.length === 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(110);
+        doc.text('Aucune donnée disponible pour cette période.', margin, y);
+        y += 8;
+        return;
+      }
+      const max = Math.max(...data.map(item => item.value), 1);
+      const labelWidth = 48;
+      const barWidth = contentWidth - labelWidth - 21;
+      data.forEach(item => {
+        const label = item.name.length > 27 ? `${item.name.slice(0, 26)}…` : item.name;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.2);
+        doc.setTextColor(55, 65, 81);
+        doc.text(label, margin, y + 3.2);
+        doc.setFillColor(232, 237, 241);
+        doc.roundedRect(margin + labelWidth, y, barWidth, 4.2, 1, 1, 'F');
+        doc.setFillColor(...color);
+        doc.roundedRect(margin + labelWidth, y, Math.max(1, (item.value / max) * barWidth), 4.2, 1, 1, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...ink);
+        doc.text(item.value.toLocaleString('fr-FR'), pageWidth - margin, y + 3.2, { align: 'right' });
+        y += 6.5;
+      });
+      y += 4;
+    };
+
+    const addLineChart = (values: { date: string; total: number }[]) => {
+      ensureSpace(69);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(...ink);
+      doc.text('Évolution hebdomadaire', margin, y);
+      y += 7;
+      if (values.length < 2) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.text('Pas assez de données pour afficher une évolution.', margin, y);
+        y += 10;
+        return;
+      }
+      const chartX = margin + 10;
+      const chartY = y;
+      const chartW = contentWidth - 14;
+      const chartH = 45;
+      const max = Math.max(...values.map(item => item.total), 1);
+      doc.setDrawColor(210, 216, 224);
+      doc.setLineWidth(0.25);
+      for (let grid = 0; grid <= 4; grid += 1) {
+        const gridY = chartY + (grid / 4) * chartH;
+        doc.line(chartX, gridY, chartX + chartW, gridY);
+        doc.setFontSize(6.5);
+        doc.setTextColor(110);
+        doc.text(Math.round(max * (1 - grid / 4)).toLocaleString('fr-FR'), chartX - 2, gridY + 1.5, { align: 'right' });
+      }
+      doc.setDrawColor(...primary);
+      doc.setFillColor(...primary);
+      doc.setLineWidth(0.8);
+      values.forEach((item, index) => {
+        const x = chartX + (index / (values.length - 1)) * chartW;
+        const pointY = chartY + chartH - (item.total / max) * chartH;
+        if (index > 0) {
+          const previous = values[index - 1];
+          const previousX = chartX + ((index - 1) / (values.length - 1)) * chartW;
+          const previousY = chartY + chartH - (previous.total / max) * chartH;
+          doc.line(previousX, previousY, x, pointY);
+        }
+        doc.circle(x, pointY, 0.9, 'F');
+        const labelStep = Math.max(1, Math.ceil(values.length / 8));
+        if (index % labelStep === 0 || index === values.length - 1) {
+          doc.setFontSize(6.2);
+          doc.setTextColor(90);
+          doc.text(format(parseISO(item.date), 'dd/MM'), x, chartY + chartH + 4, { align: 'center' });
+        }
+      });
+      y = chartY + chartH + 10;
+    };
+
+    doc.setFillColor(...ink);
+    doc.rect(0, 0, pageWidth, 36, 'F');
+    doc.setTextColor(255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(20);
+    doc.text("Rapport détaillé d'activité", margin, 16);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('Lista - Gestion logistique', margin, 23);
+    doc.setTextColor(205, 214, 224);
+    doc.text(`Généré le ${new Date().toLocaleString('fr-FR')}`, pageWidth - margin, 16, { align: 'right' });
+    const periodStart = date?.from ? format(date.from, 'dd/MM/yyyy') : 'début';
+    const periodEnd = date?.to ? format(date.to, 'dd/MM/yyyy') : periodStart;
+    doc.text(`Période du ${periodStart} au ${periodEnd}`, pageWidth - margin, 23, { align: 'right' });
+    y = 45;
+
+    const directArticleTotals = new Map<string, number>();
+    const userActivityTotals = new Map<string, number>();
+    directDistributions.forEach(distribution => {
+      const operationUser = users.find(reportUser => reportUser.id === distribution.data.userId);
+      let operationTotal = 0;
+      distribution.data.items.forEach(item => {
+        const diaper = diapers.find(candidate => candidate.id === item.diaperId);
+        const pieces = item.unit === 'cartons' && diaper ? item.quantity * diaper.piecesPerCarton : item.quantity;
+        const itemName = diaper?.name || 'Article inconnu';
+        directArticleTotals.set(itemName, (directArticleTotals.get(itemName) || 0) + pieces);
+        operationTotal += pieces;
+      });
+      const userName = operationUser?.displayName || 'Utilisateur inconnu';
+      userActivityTotals.set(userName, (userActivityTotals.get(userName) || 0) + operationTotal);
+    });
+    filteredOrders.forEach(order => {
+      const orderUser = users.find(reportUser => reportUser.id === order.userId);
+      const userName = orderUser?.displayName || 'Utilisateur inconnu';
+      const orderTotal = order.wardOrders.reduce((wardTotal, wardOrder) => (
+        wardTotal + wardOrder.items.reduce((itemTotal, item) => {
+          const diaper = diapers.find(candidate => candidate.id === item.diaperId);
+          return itemTotal + (item.unit === 'cartons' && diaper ? item.quantity * diaper.piecesPerCarton : item.quantity);
+        }, 0)
+      ), 0);
+      userActivityTotals.set(userName, (userActivityTotals.get(userName) || 0) + orderTotal);
+    });
+    const directArticleChartData = [...directArticleTotals.entries()]
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+    const userActivityChartData = [...userActivityTotals.entries()]
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
+    addSection('Synthèse exécutive', 'Les chiffres incluent les commandes et les distributions directes de la période.');
+    const metrics = [
+      ['Commandes', statsData.totalOrders.toLocaleString('fr-FR')],
+      ['Sorties directes', statsData.totalDirectDistributions.toLocaleString('fr-FR')],
+      ['Pièces sorties', statsData.totalPieces.toLocaleString('fr-FR')],
+      ['Moyenne / semaine', statsData.avgConsumption.toLocaleString('fr-FR')],
+      ['Article principal', statsData.mostOrderedItem],
+      ['Pièces manquantes', statsData.totalMissing.toLocaleString('fr-FR')],
+    ];
+    metrics.forEach((metric, index) => {
+      const column = index % 3;
+      const row = Math.floor(index / 3);
+      const cardWidth = (contentWidth - 8) / 3;
+      const x = margin + column * (cardWidth + 4);
+      const cardY = y + row * 21;
+      doc.setFillColor(245, 248, 250);
+      doc.setDrawColor(221, 227, 233);
+      doc.roundedRect(x, cardY, cardWidth, 17, 2, 2, 'FD');
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(100, 108, 120);
+      doc.text(metric[0], x + 3, cardY + 5);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(metric[1].length > 18 ? 8.5 : 12);
+      doc.setTextColor(...ink);
+      doc.text(metric[1].slice(0, 32), x + 3, cardY + 12.5);
+    });
+    y += 48;
+
+    addSection('Graphiques d’analyse');
+    addLineChart(statsData.consumptionOverTime);
+    addBarChart('Top 10 des articles sortis (pièces)', statsData.consumption.map(item => ({ name: item.name, value: item.total })), primary);
+    addBarChart('Répartition par étage et sorties directes', statsData.wardDistribution, [16, 185, 129]);
+    addBarChart('Articles remis en distribution directe', directArticleChartData, [234, 88, 12]);
+    addBarChart('Volume traité par utilisateur', userActivityChartData, [99, 102, 241]);
+
+    addSection('Détail par article', 'Classement, part du total et moyenne hebdomadaire.');
+    const weeks = Math.max(statsData.consumptionOverTime.length, 1);
+    addTable(
+      ['Rang', 'Article', 'Pièces', 'Part', 'Moy./semaine'],
+      statsData.consumption.map((item, index) => [
+        index + 1,
+        item.name,
+        item.total.toLocaleString('fr-FR'),
+        statsData.totalPieces ? `${((item.total / statsData.totalPieces) * 100).toFixed(1)} %` : '0 %',
+        Math.round(item.total / weeks).toLocaleString('fr-FR'),
+      ]),
+      { 0: 12, 1: 76, 2: 28, 3: 24, 4: 34 }
+    );
+
+    addSection('Détail par étage');
+    addTable(
+      ['Étage / origine', 'Pièces', 'Part du total'],
+      statsData.wardDistribution.map(item => [
+        item.name,
+        item.value.toLocaleString('fr-FR'),
+        statsData.totalPieces ? `${((item.value / statsData.totalPieces) * 100).toFixed(1)} %` : '0 %',
+      ]),
+      { 0: 100, 1: 40, 2: 40 }
+    );
+
+    addSection('Évolution par semaine');
+    addTable(
+      ['Semaine du', 'Pièces', 'Variation'],
+      statsData.consumptionOverTime.map((item, index, values) => {
+        const previous = index > 0 ? values[index - 1].total : 0;
+        const variation = previous ? ((item.total - previous) / previous) * 100 : 0;
+        return [format(parseISO(item.date), 'dd/MM/yyyy'), item.total.toLocaleString('fr-FR'), index ? `${variation >= 0 ? '+' : ''}${variation.toFixed(1)} %` : '-'];
+      }),
+      { 0: 70, 1: 50, 2: 50 }
+    );
+
+    addSection('Sorties directes détaillées', `${directDistributions.length} opération(s) sur la période.`);
+    addTable(
+      ['Date et heure', 'Personne', 'Utilisateur', 'Motif / commentaire', 'Articles', 'Total'],
+      [...directDistributions].sort((a, b) => (toDate(b.date)?.getTime() || 0) - (toDate(a.date)?.getTime() || 0)).map(distribution => {
+        const distributionDate = toDate(distribution.date);
+        const operationUser = users.find(reportUser => reportUser.id === distribution.data.userId);
+        const articleDetails = distribution.data.items.map(item => {
+          const diaper = diapers.find(candidate => candidate.id === item.diaperId);
+          const pieces = item.unit === 'cartons' && diaper ? item.quantity * diaper.piecesPerCarton : item.quantity;
+          return `${diaper?.name || 'Article inconnu'}: ${pieces}`;
+        });
+        const total = distribution.data.items.reduce((sum, item) => {
+          const diaper = diapers.find(candidate => candidate.id === item.diaperId);
+          return sum + (item.unit === 'cartons' && diaper ? item.quantity * diaper.piecesPerCarton : item.quantity);
+        }, 0);
+        return [
+          distributionDate?.toLocaleString('fr-FR') || '-',
+          distribution.data.recipientName || 'Non précisée',
+          operationUser?.displayName || 'Utilisateur inconnu',
+          distribution.data.comment || distribution.data.reason || '-',
+          articleDetails.join('\n'),
+          total.toLocaleString('fr-FR'),
+        ];
+      }),
+      { 0: 28, 1: 25, 2: 25, 3: 38, 4: 52, 5: 18 }
+    );
+
+    addSection('Commandes détaillées', `${filteredOrders.length} commande(s) sur la période.`);
+    addTable(
+      ['Date', 'Étage(s)', 'Utilisateur', 'Statut', 'Articles / quantités', 'Total', 'Commentaire'],
+      [...filteredOrders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(order => {
+        const orderUser = users.find(reportUser => reportUser.id === order.userId);
+        const wardNames = order.wardOrders.map(wardOrder => wards.find(ward => ward.id === wardOrder.wardId)?.name || 'Étage inconnu');
+        const articleLines: string[] = [];
+        let total = 0;
+        order.wardOrders.forEach(wardOrder => wardOrder.items.forEach(item => {
+          const diaper = diapers.find(candidate => candidate.id === item.diaperId);
+          const pieces = item.unit === 'cartons' && diaper ? item.quantity * diaper.piecesPerCarton : item.quantity;
+          total += pieces;
+          articleLines.push(`${diaper?.name || 'Article inconnu'}: ${pieces}`);
+        }));
+        return [
+          new Date(order.date).toLocaleDateString('fr-FR'),
+          wardNames.join(', '),
+          orderUser?.displayName || 'Utilisateur inconnu',
+          order.status,
+          articleLines.join('\n'),
+          total.toLocaleString('fr-FR'),
+          order.comment || '-',
+        ];
+      }),
+      { 0: 19, 1: 28, 2: 24, 3: 19, 4: 48, 5: 16, 6: 30 }
+    );
+
+    addSection('Ajustements manuels', `${detailedAdjustments.length} ajustement(s), dont ${statsData.totalMissing.toLocaleString('fr-FR')} pièce(s) manquante(s).`);
+    addTable(
+      ['Date et heure', 'Article', 'Utilisateur', 'Avant', 'Après', 'Écart'],
+      detailedAdjustments.map(adjustment => [
+        toDate(adjustment.date)?.toLocaleString('fr-FR') || '-',
+        adjustment.itemName,
+        adjustment.userName,
+        adjustment.data.oldQuantity.toLocaleString('fr-FR'),
+        adjustment.data.newQuantity.toLocaleString('fr-FR'),
+        `${adjustment.difference > 0 ? '+' : ''}${adjustment.difference.toLocaleString('fr-FR')}`,
+      ]),
+      { 0: 33, 1: 48, 2: 38, 3: 20, 4: 20, 5: 20 }
+    );
+
+    const pageCount = doc.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page += 1) {
+      doc.setPage(page);
+      doc.setDrawColor(220, 225, 230);
+      doc.line(margin, pageHeight - 10, pageWidth - margin, pageHeight - 10);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(110);
+      doc.text(`Lista - Rapport du ${periodStart} au ${periodEnd}`, margin, pageHeight - 6);
+      doc.text(`Page ${page} / ${pageCount}`, pageWidth - margin, pageHeight - 6, { align: 'right' });
     }
 
-    doc.save('rapport_analyses_commandes.pdf');
+    doc.setProperties({
+      title: `Rapport Lista ${periodStart} - ${periodEnd}`,
+      subject: 'Commandes, distributions directes, consommation et ajustements',
+      author: currentUserProfile?.displayName || 'Lista',
+      creator: 'Lista',
+    });
+    doc.save(`rapport_lista_${periodStart.replaceAll('/', '-')}_${periodEnd.replaceAll('/', '-')}.pdf`);
   };
 
   const setPresetPeriod = (preset: 'month' | 'quarter' | 'year') => {
