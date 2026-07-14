@@ -1,0 +1,100 @@
+{
+  "placeholderImages": [
+    {
+      "id": "flex-jaune",
+      "description": "Protection Flex Jaune",
+      "imageUrl": "https://picsum.photos/seed/flex-jaune/400/400",
+      "imageHint": "incontinence product"
+    },
+    {
+      "id": "flex-mauve",
+      "description": "Protection Flex Mauve",
+      "imageUrl": "https://picsum.photos/seed/flex-mauve/400/400",
+      "imageHint": "incontinence product"
+    },
+    {
+      "id": "aleze",
+      "description": "Alèse jetable",
+      "imageUrl": "https://picsum.photos/seed/aleze/400/400",
+      "imageHint": "disposable sheet"
+    },
+    {
+      "id": "cellulose",
+      "description": "Carrés de cellulose",
+      "imageUrl": "https://picsum.photos/seed/cellulose/400/400",
+      "imageHint": "cellulose pad"
+    },
+    {
+      "id": "micro",
+      "description": "Protection Micro",
+      "imageUrl": "https://picsum.photos/seed/micro/400/400",
+      "imageHint": "light incontinence"
+    },
+    {
+      "id": "diaper-medium",
+      "description": "Moby Taille M",
+      "imageUrl": "https://picsum.photos/seed/moby-m/400/400",
+      "imageHint": "diaper medium"
+    },
+    {
+      "id": "diaper-large",
+      "description": "Moby Taille L",
+      "imageUrl": "https://picsum.photos/seed/moby-l/400/400",
+      "imageHint": "diaper large"
+    },
+    {
+      "id": "diaper-xl",
+      "description": "Moby Taille XL",
+      "imageUrl": "https://picsum.photos/seed/moby-xl/400/400",
+      "imageHint": "diaper extra large"
+    },
+    {
+      "id": "culotte-bleu",
+      "description": "Culotte absorbante bleue",
+      "imageUrl": "https://picsum.photos/seed/culotte-bleu/400/400",
+      "imageHint": "absorbent underwear"
+    },
+    {
+      "id": "culotte-brun",
+      "description": "Culotte absorbante brune",
+      "imageUrl": "https://picsum.photos/seed/culotte-brun/400/400",
+      "imageHint": "absorbent underwear"
+    },
+    {
+      "id": "culotte-vert",
+      "description": "Culotte absorbante verte",
+      "imageUrl": "https://picsum.photos/seed/culotte-vert/400/400",
+      "imageHint": "absorbent underwear"
+    },
+    {
+      "id": "culotte-xxl",
+      "description": "Culotte absorbante XXL",
+      "imageUrl": "https://picsum.photos/seed/culotte-xxl/400/400",
+      "imageHint": "plus size underwear"
+    },
+    {
+      "id": "culotte-xxxl",
+      "description": "Culotte absorbante XXXL",
+      "imageUrl": "https://picsum.photos/seed/culotte-xxxl/400/400",
+      "imageHint": "plus size underwear"
+    },
+    {
+      "id": "complet-m",
+      "description": "Change complet Taille M",
+      "imageUrl": "https://picsum.photos/seed/complet-m/400/400",
+      "imageHint": "full brief diaper"
+    },
+    {
+      "id": "complet-l",
+      "description": "Change complet Taille L",
+      "imageUrl": "https://picsum.photos/seed/complet-l/400/400",
+      "imageHint": "full brief diaper"
+    },
+    {
+      "id": "complet-xl",
+      "description": "Change complet Taille XL",
+      "imageUrl": "https://picsum.photos/seed/complet-xl/400/400",
+      "imageHint": "full brief diaper"
+    }
+  ]
+}

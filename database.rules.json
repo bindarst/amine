@@ -1,0 +1,75 @@
+
+{
+  "rules": {
+    "users": {
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId || isAdmin()",
+        ".write": "auth != null && auth.uid == $userId || isAdmin()",
+        ".validate": "newData.hasChildren(['id', 'email', 'isActive']) && newData.child('id').isString() && newData.child('email').isString() && newData.child('isActive').isBoolean()"
+      }
+    },
+    "items": {
+      "$itemId": {
+        ".read": "auth != null",
+        ".write": "isAdmin()",
+        ".validate": "newData.hasChildren(['name', 'code', 'hexColor', 'piecesPerCarton', 'defaultUnit', 'isActive', 'lowStockThreshold'])"
+      }
+    },
+    "wards": {
+      "$wardId": {
+        ".read": "auth != null",
+        ".write": "isAdmin()",
+        ".validate": "newData.hasChildren(['name', 'isActive'])"
+      }
+    },
+    "suppliers": {
+      "$supplierId": {
+        ".read": "auth != null",
+        ".write": "isAdmin()",
+        ".validate": "newData.hasChildren(['name', 'isDefault'])"
+      }
+    },
+    "orders": {
+      "$orderId": {
+        ".read": "auth != null",
+        ".write": "isAdmin() || isSoignant()",
+        ".validate": "newData.hasChildren(['date', 'status', 'userId', 'wardOrders', 'createdAt', 'modifiedAt'])"
+      }
+    },
+    "deliveries": {
+      "$deliveryId": {
+        ".read": "auth != null",
+        ".write": "isAdmin() || isSoignant() || isAgentLogistique()",
+        ".validate": "newData.hasChildren(['date', 'supplier', 'userId', 'createdAt', 'items'])"
+      }
+    },
+    "stock": {
+      "$itemId": {
+        ".read": "auth != null",
+        ".write": "isAdmin() || isSoignant() || isAgentLogistique()",
+        ".validate": "newData.hasChildren(['diaperId', 'quantity'])"
+      }
+    },
+    "notifications": {
+      ".read": "auth != null",
+      ".write": "isAdmin()",
+      "$notificationId": {
+        ".validate": "newData.hasChildren(['id', 'type', 'title', 'description', 'date', 'read'])"
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}
+
+function isAdmin() {
+  return auth != null && get(/databases/(default)/documents/users/$(auth.uid)).data.role == 'Admin';
+}
+
+function isSoignant() {
+  return auth != null && get(/databases/(default)/documents/users/$(auth.uid)).data.role == 'Soignant';
+}
+
+function isAgentLogistique() {
+  return auth != null && get(/databases/(default)/documents/users/$(auth.uid)).data.role == 'Agent Logistique';
+}

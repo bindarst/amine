@@ -1,0 +1,401 @@
+
+{
+  "entities": {
+    "UserProfile": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "UserProfile",
+      "type": "object",
+      "description": "Represents a user's profile in the application.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the User entity. This is the Firebase Authentication UID."
+        },
+        "email": {
+          "type": "string",
+          "description": "User's email address.",
+          "format": "email"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User's display name."
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "URL of the user's profile photo.",
+          "format": "uri"
+        },
+        "lastLogin": {
+          "type": "string",
+          "description": "Timestamp of the user's last login.",
+          "format": "date-time"
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Indicates if the user account is active. Set to false for new users until an Admin activates them."
+        },
+        "role": {
+            "type": "string",
+            "description": "The role of the user, which determines their permissions.",
+            "enum": ["Admin", "Soignant", "Agent Logistique"]
+        },
+        "avatarId": {
+            "type": "string",
+            "description": "Identifier for the selected user avatar."
+        },
+        "pushNotificationsEnabled": {
+          "type": "boolean",
+          "description": "Indicates if the user has enabled push notifications on their phone."
+        },
+        "pushToken": {
+          "type": "string",
+          "description": "FCM token for push notifications."
+        }
+      },
+      "required": ["id", "email", "isActive"]
+    },
+    "Item": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Item",
+      "type": "object",
+      "description": "Represents a type of diaper product.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the diaper product."
+        },
+        "code": {
+          "type": "string",
+          "description": "Product code or SKU."
+        },
+        "hexColor": {
+          "type": "string",
+          "description": "Hexadecimal color code associated with the diaper type."
+        },
+        "defaultUnit": {
+          "type": "string",
+          "description": "Default unit of measure ('pieces' or 'cartons')."
+        },
+        "piecesPerCarton": {
+          "type": "number",
+          "description": "Number of individual pieces per carton."
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Indicates if the item is currently active and available."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modifiedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "description": {
+          "type": "string",
+          "description": "A description of the item."
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "URL of an image of the item.",
+          "format": "uri"
+        },
+        "lowStockThreshold": {
+          "type": "number",
+          "description": "The quantity at which the stock is considered low."
+        }
+      },
+      "required": [
+        "name",
+        "code",
+        "hexColor",
+        "defaultUnit",
+        "piecesPerCarton",
+        "isActive",
+        "lowStockThreshold"
+      ]
+    },
+    "Ward": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Ward",
+      "type": "object",
+      "description": "Represents a care unit (e.g., ward, room).",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of the ward or room."
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Indicates if the ward is currently active."
+        },
+        "parLevels": {
+          "type": "object",
+          "description": "A map of item IDs to their target weekly stock levels for this ward.",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "isActive"
+      ]
+    },
+    "Supplier": {
+       "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Supplier",
+      "type": "object",
+      "description": "Represents a supplier or delivery person.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of the supplier."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "Indicates if this is the default supplier."
+        }
+      },
+      "required": [
+        "name",
+        "isDefault"
+      ]
+    },
+    "Order": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Order",
+      "type": "object",
+      "description": "Represents a grouped diaper order for multiple wards.",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Date of the order.",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the order (e.g., draft, confirmed, printed)."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to User. (Relationship: User 1:N Order)  ID of the user who created the order."
+        },
+        "distributorId": {
+            "type": "string"
+        },
+        "distributedAt": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp of when the order was created.",
+          "format": "date-time"
+        },
+        "modifiedAt": {
+          "type": "string",
+          "description": "Timestamp of when the order was last modified.",
+          "format": "date-time"
+        },
+        "comment": {
+          "type": "string",
+          "description": "An optional comment about the order."
+        },
+        "wardOrders": {
+          "type": "array",
+          "description": "An array of orders, one for each ward.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "wardId": {
+                "type": "string"
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "diaperId": { "type": "string" },
+                    "quantity": { "type": "number" },
+                    "unit": { "type": "string", "enum": ["pieces", "cartons"] }
+                  },
+                   "required": ["diaperId", "quantity", "unit"]
+                }
+              }
+            },
+            "required": ["wardId", "items"]
+          }
+        }
+      },
+      "required": [
+        "date",
+        "status",
+        "userId",
+        "wardOrders",
+        "createdAt",
+        "modifiedAt"
+      ]
+    },
+    "Delivery": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Delivery",
+      "type": "object",
+      "description": "Represents a delivery from a supplier.",
+      "properties": {
+        "date": { "type": "string", "format": "date-time" },
+        "supplier": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "diaperId": { "type": "string" },
+              "quantity": { "type": "number" },
+              "unit": { "type": "string", "enum": ["pieces", "cartons"] }
+            },
+            "required": ["diaperId", "quantity", "unit"]
+          }
+        }
+      },
+      "required": ["date", "supplier", "userId", "createdAt", "items"]
+    },
+    "Stock": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Stock",
+      "type": "object",
+      "description": "Represents the stock level for a single item.",
+      "properties": {
+        "diaperId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "modifiedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["diaperId", "quantity"]
+    },
+    "Notification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Notification",
+      "type": "object",
+      "description": "Represents a system notification or alert.",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["anomaly", "info", "order", "delivery", "user", "stock"] },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" },
+        "data": { "type": "object" },
+        "forRole": { "type": "string", "enum": ["Admin", "Soignant", "Agent Logistique"] }
+      },
+      "required": ["id", "type", "title", "description", "date", "read"]
+    },
+    "Mail": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Mail",
+      "type": "object",
+      "description": "Represents an email to be sent by the 'Trigger Email' extension.",
+      "properties": {
+        "to": {
+          "type": "array",
+          "items": { "type": "string", "format": "email" }
+        },
+        "message": {
+          "type": "object",
+          "properties": {
+            "subject": { "type": "string" },
+            "text": { "type": "string" },
+            "html": { "type": "string" }
+          },
+          "required": ["subject"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["to", "message"]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "UserProfile",
+          "schema": { "$ref": "#/entities/UserProfile" },
+          "description": "Stores user profile information. `userId` is the Firebase Authentication UID."
+        }
+      },
+      {
+        "path": "/items/{itemId}",
+        "definition": {
+          "entityName": "Item",
+          "schema": { "$ref": "#/entities/Item" },
+          "description": "Stores diaper product types."
+        }
+      },
+      {
+        "path": "/wards/{wardId}",
+        "definition": {
+          "entityName": "Ward",
+          "schema": { "$ref": "#/entities/Ward" },
+          "description": "Stores care unit information, including target stock levels (par levels) for items."
+        }
+      },
+       {
+        "path": "/suppliers/{supplierId}",
+        "definition": {
+          "entityName": "Supplier",
+          "schema": { "$ref": "#/entities/Supplier" },
+          "description": "Stores supplier information."
+        }
+      },
+       {
+        "path": "/orders/{orderId}",
+        "definition": {
+          "entityName": "Order",
+          "schema": { "$ref": "#/entities/Order" },
+          "description": "Stores grouped diaper order information."
+        }
+      },
+      {
+        "path": "/deliveries/{deliveryId}",
+        "definition": {
+          "entityName": "Delivery",
+          "schema": { "$ref": "#/entities/Delivery" },
+          "description": "Stores supplier delivery information."
+        }
+      },
+      {
+        "path": "/stock/{itemId}",
+        "definition": {
+          "entityName": "Stock",
+          "schema": { "$ref": "#/entities/Stock" },
+          "description": "Stores the current stock level for each item. The document ID is the item ID."
+        }
+      },
+      {
+        "path": "/notifications/{notificationId}",
+        "definition": {
+            "entityName": "Notification",
+            "schema": { "$ref": "#/entities/Notification" },
+            "description": "Stores system notifications and alerts for users."
+        }
+      },
+      {
+        "path": "/mail/{mailId}",
+        "definition": {
+          "entityName": "Mail",
+          "schema": { "$ref": "#/entities/Mail" },
+          "description": "Triggers an email to be sent by the 'Trigger Email' Firebase Extension."
+        }
+      }
+    ]
+  }
+}

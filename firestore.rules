@@ -1,0 +1,132 @@
+/**
+ * @file Firestore Security Rules
+ * @description This ruleset allows all users to read and write all data.
+ * @dataStructure
+ * - /users/{userId}: Stores user profile information.
+ * - /items/{itemId}: Stores diaper product types.
+ * - /wards/{wardId}: Stores care unit information, including target stock levels (par levels) for items.
+ * - /suppliers/{supplierId}: Stores supplier information.
+ * - /orders/{orderId}: Stores grouped diaper order information.
+ * - /deliveries/{deliveryId}: Stores supplier delivery information.
+ * - /stock/{itemId}: Stores the current stock level for each item. The document ID is the item ID.
+ * - /notifications/{notificationId}: Stores system notifications and alerts for users.
+ * - /mail/{mailId}: Stores emails to be sent. Only backend processes should write here.
+ * @keySecurityDecisions All users can read and write all data for prototyping.
+ */
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * @description Allows any user to read or write user profile information.
+     * @path /users/{userId}
+     * @allow (get, list, create, update, delete) Any authenticated user.
+     * @deny None
+     * @principle Open access for prototyping.
+     */
+    match /users/{userId} {
+      allow get, list: if true;
+      allow create, update, delete: if true;
+    }
+
+    /**
+     * @description Allows any user to read or write item information.
+     * @path /items/{itemId}
+     * @allow (get, list, create, update, delete) Any authenticated user.
+     * @deny None
+     * @principle Open access for prototyping.
+     */
+    match /items/{itemId} {
+      allow get, list: if true;
+      allow create, update, delete: if true;
+    }
+
+    /**
+     * @description Allows any user to read or write ward information.
+     * @path /wards/{wardId}
+     * @allow (get, list, create, update, delete) Any authenticated user.
+     * @deny None
+     * @principle Open access for prototyping.
+     */
+    match /wards/{wardId} {
+      allow get, list: if true;
+      allow create, update, delete: if true;
+    }
+
+     /**
+      * @description Allows any user to read or write supplier information.
+      * @path /suppliers/{supplierId}
+      * @allow (get, list, create, update, delete) Any authenticated user.
+      * @deny None
+      * @principle Open access for prototyping.
+      */
+    match /suppliers/{supplierId} {
+      allow get, list: if true;
+      allow create, update, delete: if true;
+    }
+
+    /**
+     * @description Allows any user to read or write order information.
+     * @path /orders/{orderId}
+     * @allow (get, list, create, update, delete) Any authenticated user.
+     * @deny None
+     * @principle Open access for prototyping.
+     */
+    match /orders/{orderId} {
+      allow get, list: if true;
+      allow create, update, delete: if true;
+    }
+
+    /**
+     * @description Allows any user to read or write delivery information.
+     * @path /deliveries/{deliveryId}
+     * @allow (get, list, create, update, delete) Any authenticated user.
+     * @deny None
+     * @principle Open access for prototyping.
+     */
+    match /deliveries/{deliveryId} {
+      allow get, list: if true;
+      allow create, update, delete: if true;
+    }
+
+    /**
+     * @description Allows any user to read or write stock information.
+     * @path /stock/{itemId}
+     * @allow (get, list, create, update, delete) Any authenticated user.
+     * @deny None
+     * @principle Open access for prototyping.
+     */
+    match /stock/{itemId} {
+      allow get, list: if true;
+      allow create, update, delete: if true;
+    }
+
+    /**
+     * @description Allows any user to read or write notification information.
+     * @path /notifications/{notificationId}
+     * @allow (get, list, create, update, delete) Any authenticated user.
+     * @deny None
+     * @principle Open access for prototyping.
+     */
+    match /notifications/{notificationId} {
+        allow get, list: if true;
+        allow create, update, delete: if true;
+    }
+
+    match /directDistributions/{distributionId} {
+        allow get, list: if true;
+        allow create, update, delete: if true;
+    }
+
+    /**
+     * @description Controls access to the 'mail' collection for sending emails.
+     * @path /mail/{mailId}
+     * @allow (read, write) Nobody from the client-side. Only backend services can write.
+     * @deny (read, write) All client-side requests are denied.
+     * @principle Security hardening. This collection is write-only for backend services.
+     */
+    match /mail/{mailId} {
+        allow read, write: if false;
+    }
+  }
+}

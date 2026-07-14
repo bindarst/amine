@@ -1,0 +1,21 @@
+{
+  "name": "DiaperFlow",
+  "short_name": "DiaperFlow",
+  "description": "Application de gestion des demandes de changes",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#267289",
+  "icons": [
+    {
+      "src": "/splash.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/splash.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
