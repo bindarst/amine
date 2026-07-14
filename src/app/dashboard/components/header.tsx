@@ -32,6 +32,7 @@ import { PushNotificationToggle } from '@/components/ui/push-notification-toggle
 import { cn } from '@/lib/utils';
 import { PremiumIcon } from '@/components/ui/premium-icon';
 import { MobileMenu } from './mobile-menu';
+import { OnlineStatusBadge } from '@/components/ui/online-status';
 
 const allNavItems = [
   { href: '/dashboard', icon: LayoutGrid, label: 'Tableau de bord', roles: ['Admin', 'Soignant', 'Agent Logistique'] },
@@ -114,6 +115,7 @@ export default function Header() {
         </nav>
       </div>
       <div className="flex items-center w-full justify-end gap-2 sm:gap-4">
+        <OnlineStatusBadge />
         <CommandPalette />
         <PushNotificationToggle />
         <ThemeToggle />

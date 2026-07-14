@@ -19,7 +19,6 @@ import { useRouter } from 'next/navigation';
 import { useItems } from '../../settings/items-context';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { useStock } from '../../stock/stock-context';
 import { useSuppliers } from '../../settings/suppliers-context';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useUsers } from '../../settings/users-context';
@@ -46,7 +45,6 @@ const generateInitialState = (diapers: Diaper[]) => {
 
 export default function NewDeliveryPage() {
   const { items: diapers, isLoading: isLoadingItems } = useItems();
-  const { stock: currentStock, isLoading: isLoadingStock, updateStock } = useStock();
   const { suppliers, isLoading: isLoadingSuppliers } = useSuppliers();
   const { addDelivery } = useDeliveries();
   const { toast } = useToast();
@@ -222,11 +220,11 @@ export default function NewDeliveryPage() {
       items: deliveryItemsForDb,
     });
 
-    await updateStock(deliveryItemsForDb);
-
     toast({
-      title: "Livraison Enregistrée!",
-      description: `La livraison a bien été enregistrée et le stock a été mis à jour.`,
+      title: navigator.onLine ? "Livraison enregistrée" : "Livraison conservée hors ligne",
+      description: navigator.onLine
+        ? "La livraison et le stock ont été enregistrés."
+        : "Elle sera envoyée automatiquement dès le retour de la connexion.",
     });
 
     router.push('/dashboard/deliveries');
@@ -321,7 +319,7 @@ export default function NewDeliveryPage() {
     setActiveSwipeTarget(null);
   };
 
-  const isLoading = isLoadingItems || isLoadingSuppliers || Object.keys(deliveryState).length === 0 || isLoadingStock;
+  const isLoading = isLoadingItems || isLoadingSuppliers || Object.keys(deliveryState).length === 0;
 
   if (isLoading) {
     return (

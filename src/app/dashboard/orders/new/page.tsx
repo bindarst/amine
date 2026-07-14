@@ -161,8 +161,10 @@ export default function NewOrderPage() {
       window.dispatchEvent(new StorageEvent('storage', { key: 'inProgressOrder', newValue: null }));
 
       toast({
-        title: "Demande Envoyée!",
-        description: `La commande groupée a bien été transmise.`,
+        title: navigator.onLine ? "Demande envoyée" : "Demande conservée hors ligne",
+        description: navigator.onLine
+          ? "La commande groupée a bien été transmise."
+          : "Elle sera synchronisée automatiquement au retour de la connexion.",
       });
 
       router.push('/dashboard/orders');

@@ -128,17 +128,27 @@ export default function DirectDistributionPage() {
         }
         
         const reason = comment.trim() || `Remise a ${recipientName.trim()}`;
-        await directStockDistribution(distributionItems, reason, {
-            recipientName: recipientName.trim(),
-            comment: comment.trim(),
-        });
+        try {
+            await directStockDistribution(distributionItems, reason, {
+                recipientName: recipientName.trim(),
+                comment: comment.trim(),
+            });
 
-        toast({
-            title: "Distribution Enregistrée!",
-            description: `La sortie de stock a été enregistrée.`,
-        });
-
-        router.push('/dashboard/stock');
+            toast({
+                title: navigator.onLine ? "Distribution enregistrée" : "Distribution conservée hors ligne",
+                description: navigator.onLine
+                    ? "La sortie de stock a été enregistrée."
+                    : "Elle sera synchronisée automatiquement au retour de la connexion.",
+            });
+            router.push('/dashboard/stock');
+        } catch (error) {
+            toast({
+                title: "Distribution impossible",
+                description: error instanceof Error ? error.message : "Une erreur est survenue.",
+                variant: "destructive",
+            });
+            setIsSubmitting(false);
+        }
     };
 
     const isDistributionEmpty = () => {

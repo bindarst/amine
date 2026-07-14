@@ -4,7 +4,6 @@
 import * as React from 'react';
 import {
   collection,
-  addDoc,
   updateDoc,
   doc,
   serverTimestamp,
@@ -12,7 +11,6 @@ import {
   orderBy,
   getDocs,
   writeBatch,
-  runTransaction,
   where,
 } from 'firebase/firestore';
 import type { Order, Diaper, Ward, UserProfile, WithId } from '@/lib/types';
@@ -26,6 +24,7 @@ import { useStock } from '../stock/stock-context';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { sendTransactionalEmail } from '@/lib/actions';
+import { queueFirestoreWrite } from '@/lib/offline-sync';
 
 interface OrdersContextType {
   orders: WithId<Order>[];
@@ -147,42 +146,39 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       if (!user || !firestore) {
         throw new Error('User or Firestore not available');
       }
-      const ordersCollectionRef = collection(firestore, 'orders');
+      const orderRef = doc(collection(firestore, 'orders'));
+      const notificationRef = doc(collection(firestore, 'notifications'));
+      const involvedWards = orderData.wardOrders.map(wo => allWards.find(w => w.id === wo.wardId)?.name).filter(Boolean).join(', ');
+      const totalItems = orderData.wardOrders.reduce((sum, wo) => sum + wo.items.length, 0);
+      let description = `📦 ${userProfile?.displayName || user.email} a créé une nouvelle commande pour ${orderData.wardOrders.length} étage(s) : ${involvedWards}. Total: ${totalItems} article(s) différent(s).`;
+      if (orderData.comment) description += ` 💬 "${orderData.comment}"`;
 
-      const orderDoc = {
+      const batch = writeBatch(firestore);
+      batch.set(orderRef, {
         ...orderData,
         userId: user.uid,
         createdAt: serverTimestamp(),
         modifiedAt: serverTimestamp(),
-      };
+        clientOperationId: orderRef.id,
+      });
+      batch.set(notificationRef, {
+        type: 'order',
+        title: '✨ Nouvelle commande créée',
+        description,
+        data: { orderId: orderRef.id, userId: user.uid },
+        date: serverTimestamp(),
+        read: false,
+      });
 
-      // Use non-blocking write
-      const docRefPromise = addDocumentNonBlocking(ordersCollectionRef, orderDoc);
+      queueFirestoreWrite({
+        id: `order:${orderRef.id}`,
+        type: 'order',
+        label: `Commande ${involvedWards}`,
+        write: () => batch.commit(),
+        onError: error => console.error('Order sync failed:', error),
+      });
 
-      // Run post-order tasks in the background
-      docRefPromise.then(docRef => {
-        if (!docRef) return;
-
-        const involvedWards = orderData.wardOrders.map(wo => allWards.find(w => w.id === wo.wardId)?.name).filter(Boolean).join(', ');
-        const totalItems = orderData.wardOrders.reduce((sum, wo) => sum + wo.items.length, 0);
-        let description = `📦 ${userProfile?.displayName || user.email} a créé une nouvelle commande pour ${orderData.wardOrders.length} étage(s) : ${involvedWards}. Total: ${totalItems} article(s) différent(s).`;
-        if (orderData.comment) {
-          description += ` 💬 "${orderData.comment}"`;
-        }
-
-        // In-app Notification for order creation
-        const orderNotification = {
-          type: 'order',
-          title: '✨ Nouvelle commande créée',
-          description: description,
-          data: {
-            orderId: docRef.id,
-            userId: user.uid,
-          }
-        };
-        addNotification(orderNotification);
-
-        // Email Notification
+      if (typeof navigator === 'undefined' || navigator.onLine) {
         const subject = `[Lista] Nouvelle Commande Créée - ${involvedWards}`;
         const textBody = `Une nouvelle commande a été créée par ${userProfile?.displayName || user.email} pour les étages suivants : ${involvedWards}.\n${orderData.comment ? `Commentaire: ${orderData.comment}` : ''}\nConsultez la commande sur l'application.`;
         const htmlBody = `
@@ -194,25 +190,15 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         `;
         sendTransactionalEmail({ subject: subject, text: textBody, html: htmlBody });
 
-        // Anomaly check
         const ordersQuery = query(collection(firestore, 'orders'), orderBy('date', 'desc'));
-        if (ordersQuery) {
-          getDocs(ordersQuery).then(allOrdersSnapshot => {
-            const allOrders: WithId<Order>[] = allOrdersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithId<Order>));
-            checkForAnomalies(orderData, allOrders, allDiapers, allWards);
-          }).catch(e => console.error("Error fetching all orders for anomaly check:", e));
-        }
-      }).catch(e => {
-        console.error("Error adding order document:", e);
-        toast({
-          title: 'Erreur',
-          description: "Impossible d'ajouter la commande.",
-          variant: 'destructive',
-        });
-      });
+        getDocs(ordersQuery).then(allOrdersSnapshot => {
+          const allOrders: WithId<Order>[] = allOrdersSnapshot.docs.map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as WithId<Order>));
+          checkForAnomalies(orderData, allOrders, allDiapers, allWards);
+        }).catch(error => console.error("Error fetching all orders for anomaly check:", error));
+      }
 
     },
-    [user, firestore, toast, checkForAnomalies, userProfile, addNotification]
+    [user, firestore, checkForAnomalies, userProfile]
   );
 
   const updateOrder = React.useCallback(async (orderId: string, updates: Partial<Omit<Order, 'id' | 'createdAt'>>) => {
@@ -222,17 +208,19 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
     const orderDocRef = doc(firestore, 'orders', orderId);
 
     try {
-      let originalOrder: Order | null = null;
-      await runTransaction(firestore, async (transaction) => {
-        const orderDoc = await transaction.get(orderDocRef);
-        if (!orderDoc.exists()) {
-          throw new Error("La commande n'existe pas !");
-        }
-        originalOrder = orderDoc.data() as Order;
+      const originalOrder = orders?.find(order => order.id === orderId);
+      if (!originalOrder) throw new Error("La commande n'est pas disponible dans le cache local.");
+      if (updates.status === 'distributed' && originalOrder.status === 'distributed') return;
 
-        const updatedData: Partial<Order> = { ...updates, modifiedAt: serverTimestamp() };
-
-        transaction.update(orderDocRef, updatedData);
+      const operationId = doc(collection(firestore, '_operationIds')).id;
+      const batch = writeBatch(firestore);
+      batch.update(orderDocRef, { ...updates, modifiedAt: serverTimestamp() });
+      queueFirestoreWrite({
+        id: `order-update:${operationId}`,
+        type: 'order',
+        label: updates.status === 'distributed' ? 'Distribution de commande' : 'Modification de commande',
+        write: () => batch.commit(),
+        onError: error => console.error('Order update sync failed:', error),
       });
 
       // Notifications after successful transaction
@@ -391,4 +379,3 @@ export function useOrders() {
   }
   return context;
 }
-

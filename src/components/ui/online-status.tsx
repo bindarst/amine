@@ -4,11 +4,25 @@ import * as React from 'react';
 import { Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { getPendingOperations, subscribeToPendingOperations } from '@/lib/offline-sync';
+
+function usePendingOperationCount(): number {
+    const [count, setCount] = React.useState(0);
+
+    React.useEffect(() => {
+        const update = () => setCount(getPendingOperations().length);
+        update();
+        return subscribeToPendingOperations(update);
+    }, []);
+
+    return count;
+}
 
 export function OnlineStatus() {
     const [isOnline, setIsOnline] = React.useState(true);
     const [showBanner, setShowBanner] = React.useState(false);
     const [justReconnected, setJustReconnected] = React.useState(false);
+    const pendingCount = usePendingOperationCount();
 
     React.useEffect(() => {
         // Fonction pour mettre à jour le statut
@@ -91,8 +105,8 @@ export function OnlineStatus() {
                             </p>
                             <p className="text-xs text-muted-foreground">
                                 {justReconnected
-                                    ? 'Synchronisation en cours vers la base de données...'
-                                    : 'Vous pouvez continuer : commandes et modifications seront enregistrées et envoyées à la BDD dès que vous serez en ligne.'}
+                                    ? `${pendingCount || 'Les'} opération(s) en attente sont envoyées vers la base de données.`
+                                    : `${pendingCount} opération(s) conservée(s) sur ce téléphone. Vous pouvez continuer à travailler.`}
                             </p>
                         </div>
 
@@ -119,6 +133,7 @@ export function OnlineStatus() {
 // Badge minimaliste dans le header
 export function OnlineStatusBadge() {
     const [isOnline, setIsOnline] = React.useState(true);
+    const pendingCount = usePendingOperationCount();
 
     React.useEffect(() => {
         const updateOnlineStatus = () => setIsOnline(navigator.onLine);
@@ -133,23 +148,25 @@ export function OnlineStatusBadge() {
         };
     }, []);
 
-    if (isOnline) return null;
+    if (isOnline && pendingCount === 0) return null;
 
     return (
         <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             exit={{ scale: 0 }}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/20 border border-red-500/50"
+            className={cn(
+                "flex items-center gap-2 px-2.5 py-1.5 rounded-md border",
+                isOnline ? "bg-primary/10 border-primary/30" : "bg-red-500/10 border-red-500/40"
+            )}
         >
-            <motion.div
-                animate={{ opacity: [1, 0.3, 1] }}
-                transition={{ duration: 2, repeat: Infinity }}
-            >
+            {isOnline ? (
+                <RefreshCw className="h-3.5 w-3.5 text-primary animate-spin" />
+            ) : (
                 <WifiOff className="h-3.5 w-3.5 text-red-500" />
-            </motion.div>
-            <span className="text-xs font-medium text-red-700 dark:text-red-300">
-                Hors ligne
+            )}
+            <span className={cn("text-xs font-medium", isOnline ? "text-primary" : "text-red-700 dark:text-red-300")}>
+                {isOnline ? `${pendingCount} en attente` : `Hors ligne${pendingCount ? ` · ${pendingCount}` : ''}`}
             </span>
         </motion.div>
     );

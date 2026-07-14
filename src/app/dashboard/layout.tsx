@@ -12,6 +12,7 @@ import { NotificationsProvider } from './notifications-context';
 import { InstallPWA } from '@/components/ui/install-pwa';
 import { OnlineStatus } from '@/components/ui/online-status';
 import { NativePushTokenBridge } from '@/components/native-push-token-bridge';
+import { OfflineSyncManager } from '@/components/offline-sync-manager';
 
 export default function DashboardLayout({
   children,
@@ -28,6 +29,7 @@ export default function DashboardLayout({
                 <OrdersProvider>
                   <NotificationsProvider>
                     <NativePushTokenBridge />
+                    <OfflineSyncManager />
                     <MainLayout>{children}</MainLayout>
                     <InstallPWA />
                     <OnlineStatus />

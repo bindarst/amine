@@ -5,13 +5,12 @@ import * as React from 'react';
 import type { StockItem, DeliveryItem, Order, UserProfile, Diaper, WithId } from '@/lib/types';
 import { useFirebase, useMemoFirebase, useDoc } from '@/firebase';
 import { useCollection } from '@/firebase/firestore/use-collection';
-import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, serverTimestamp, writeBatch, increment } from 'firebase/firestore';
 import { useToast } from '@/components/ui/use-toast';
 import { useItems } from '../settings/items-context';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 import { addDocumentNonBlocking } from '@/firebase/non-blocking-updates';
 import { sendTransactionalEmail } from '@/lib/actions';
+import { queueFirestoreWrite } from '@/lib/offline-sync';
 
 interface StockContextType {
   stock: WithId<StockItem>[];
@@ -96,63 +95,25 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
     async (deliveredItems: DeliveryItem[]) => {
       if (!firestore) throw new Error('Firestore is not initialized.');
 
-      try {
-        await runTransaction(firestore, async (transaction) => {
-          const stockUpdates = [];
-
-          // Phase 1: Read all data
-          for (const deliveredItem of deliveredItems) {
-            const stockDocRef = doc(firestore, 'stock', deliveredItem.diaperId);
-            const stockDoc = await transaction.get(stockDocRef);
-            const diaperInfo = diapers.find(d => d.id === deliveredItem.diaperId);
-
-            const currentQuantity = stockDoc.exists() ? stockDoc.data().quantity || 0 : 0;
-            const newQuantity = currentQuantity + deliveredItem.quantity;
-
-            stockUpdates.push({
-              ref: stockDocRef,
-              newQuantity: newQuantity,
-              exists: stockDoc.exists(),
-              diaperInfo: diaperInfo,
-              oldQuantity: currentQuantity,
-            });
-          }
-
-          // Phase 2: Perform all writes
-          for (const update of stockUpdates) {
-            if (update.exists) {
-              transaction.update(update.ref, {
-                quantity: update.newQuantity,
-                modifiedAt: serverTimestamp(),
-              });
-            } else {
-              transaction.set(update.ref, {
-                diaperId: update.diaperInfo?.id,
-                quantity: update.newQuantity,
-                createdAt: serverTimestamp(),
-                modifiedAt: serverTimestamp(),
-              });
-            }
-          }
-
-          // Phase 3: Trigger notifications after transaction is prepared
-          for (const update of stockUpdates) {
-            if (update.diaperInfo) {
-              checkLowStockAndNotify(update.diaperInfo, update.oldQuantity, update.newQuantity);
-            }
-          }
-        });
-      } catch (error) {
-        console.error('Stock update transaction failed: ', error);
-        const permissionError = new FirestorePermissionError({
-          path: 'stock',
-          operation: 'write',
-          requestResourceData: deliveredItems,
-        });
-        errorEmitter.emit('permission-error', permissionError);
+      const operationId = doc(collection(firestore, '_operationIds')).id;
+      const batch = writeBatch(firestore);
+      for (const item of deliveredItems) {
+        batch.set(doc(firestore, 'stock', item.diaperId), {
+          diaperId: item.diaperId,
+          quantity: increment(item.quantity),
+          modifiedAt: serverTimestamp(),
+        }, { merge: true });
       }
+
+      queueFirestoreWrite({
+        id: `stock-in:${operationId}`,
+        type: 'stock',
+        label: 'Entrée de stock',
+        write: () => batch.commit(),
+        onError: error => console.error('Stock update sync failed:', error),
+      });
     },
-    [firestore, diapers, checkLowStockAndNotify]
+    [firestore]
   );
 
   const deductStockFromOrder = React.useCallback(
@@ -166,113 +127,80 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      try {
-        await runTransaction(firestore, async (transaction) => {
-          const stockUpdates = [];
-
-          // Phase 1: Read all data first
-          for (const wardOrder of order.wardOrders) {
-            for (const orderItem of wardOrder.items) {
-              const stockDocRef = doc(firestore, 'stock', orderItem.diaperId);
-              const stockDoc = await transaction.get(stockDocRef);
-              const diaperInfo = diapers.find(d => d.id === orderItem.diaperId);
-
-              if (stockDoc.exists() && diaperInfo) {
-                const quantityToDeduct = orderItem.unit === 'cartons' && diaperInfo.piecesPerCarton
-                  ? orderItem.quantity * diaperInfo.piecesPerCarton
-                  : orderItem.quantity;
-
-                const currentQuantity = stockDoc.data().quantity || 0;
-                const newQuantity = Math.max(0, currentQuantity - quantityToDeduct);
-
-                stockUpdates.push({
-                  ref: stockDocRef,
-                  newQuantity: newQuantity,
-                  diaperInfo: diaperInfo,
-                  oldQuantity: currentQuantity
-                });
-              } else {
-                console.warn(`Stock document for item ${orderItem.diaperId} not found. Cannot deduct stock.`);
-              }
-            }
-          }
-
-          // Phase 2: Perform all writes
-          for (const update of stockUpdates) {
-            transaction.update(update.ref, {
-              quantity: update.newQuantity,
-              modifiedAt: serverTimestamp(),
-            });
-          }
-
-          // Phase 3: Trigger notifications (non-blocking) after transaction is prepared
-          for (const update of stockUpdates) {
-            checkLowStockAndNotify(update.diaperInfo, update.oldQuantity, update.newQuantity);
-          }
-        });
-        toast({
-          title: "Stock Mis à Jour",
-          description: "Les quantités ont été déduites du stock.",
-        });
-      } catch (error) {
-        console.error("Stock deduction transaction failed: ", error);
-        const permissionError = new FirestorePermissionError({
-          path: 'stock', // Path is simplified for batch writes
-          operation: 'write',
-          requestResourceData: order.wardOrders,
-        });
-        errorEmitter.emit('permission-error', permissionError);
+      const batch = writeBatch(firestore);
+      for (const wardOrder of order.wardOrders) {
+        for (const orderItem of wardOrder.items) {
+          const diaperInfo = diapers.find(d => d.id === orderItem.diaperId);
+          const quantityToDeduct = orderItem.unit === 'cartons' && diaperInfo?.piecesPerCarton
+            ? orderItem.quantity * diaperInfo.piecesPerCarton
+            : orderItem.quantity;
+          batch.set(doc(firestore, 'stock', orderItem.diaperId), {
+            diaperId: orderItem.diaperId,
+            quantity: increment(-quantityToDeduct),
+            modifiedAt: serverTimestamp(),
+          }, { merge: true });
+        }
       }
+
+      const operationId = doc(collection(firestore, '_operationIds')).id;
+      queueFirestoreWrite({
+        id: `order-stock:${operationId}`,
+        type: 'stock',
+        label: 'Distribution de commande',
+        write: () => batch.commit(),
+        onError: error => console.error('Order stock sync failed:', error),
+      });
+
+      toast({
+        title: "Stock mis à jour",
+        description: typeof navigator !== 'undefined' && !navigator.onLine
+          ? "La déduction est conservée sur ce téléphone et sera synchronisée."
+          : "Les quantités ont été déduites du stock.",
+      });
     },
-    [firestore, toast, diapers, checkLowStockAndNotify]
+    [firestore, toast, diapers]
   );
 
   const manualStockUpdate = React.useCallback(async (diaperId: string, newQuantity: number) => {
     if (!firestore || !user) throw new Error("Firestore not initialized");
 
     const stockDocRef = doc(firestore, 'stock', diaperId);
-    let oldQuantity = 0;
+    const oldQuantity = (stock || []).find(item => item.diaperId === diaperId)?.quantity || 0;
     const diaperInfo = diapers.find(d => d.id === diaperId);
+    const notificationRef = doc(collection(firestore, 'notifications'));
+    const difference = newQuantity - oldQuantity;
+    const action = difference > 0 ? 'augmenté' : 'diminué';
+    const description = `🔧 ${userProfile?.displayName || user.email} a ${action} le stock de "${diaperInfo?.name || 'un article'}" : ${oldQuantity} → ${newQuantity} pièces (${difference > 0 ? '+' : ''}${difference}).`;
+    const batch = writeBatch(firestore);
+    batch.set(stockDocRef, {
+      diaperId,
+      quantity: newQuantity,
+      modifiedAt: serverTimestamp(),
+    }, { merge: true });
+    batch.set(notificationRef, {
+      type: 'info',
+      title: '⚙️ Ajustement manuel du stock',
+      description,
+      data: {
+        diaperId,
+        oldQuantity,
+        newQuantity,
+        userId: user.uid,
+        itemName: diaperInfo?.name,
+      },
+      date: serverTimestamp(),
+      read: false,
+    });
 
-    try {
-      await runTransaction(firestore, async (transaction) => {
-        const stockDoc = await transaction.get(stockDocRef);
-        if (stockDoc.exists()) {
-          oldQuantity = stockDoc.data().quantity || 0;
-          transaction.update(stockDocRef, {
-            quantity: newQuantity,
-            modifiedAt: serverTimestamp(),
-          });
-        } else {
-          oldQuantity = 0;
-          transaction.set(stockDocRef, {
-            diaperId: diaperId,
-            quantity: newQuantity,
-            createdAt: serverTimestamp(),
-            modifiedAt: serverTimestamp(),
-          });
-        }
-      });
+    queueFirestoreWrite({
+      id: `stock-adjustment:${notificationRef.id}`,
+      type: 'stock',
+      label: `Ajustement ${diaperInfo?.name || diaperId}`,
+      write: () => batch.commit(),
+      onError: error => console.error('Manual stock sync failed:', error),
+    });
 
-      const difference = newQuantity - oldQuantity;
-      const action = difference > 0 ? 'augmenté' : 'diminué';
-      const description = `🔧 ${userProfile?.displayName || user.email} a ${action} le stock de "${diaperInfo?.name || 'un article'}" : ${oldQuantity} → ${newQuantity} pièces (${difference > 0 ? '+' : ''}${difference}).`;
-      // In-app Notification
-      const notification = {
-        type: 'info' as const,
-        title: '⚙️ Ajustement manuel du stock',
-        description: description,
-        data: {
-          diaperId: diaperId,
-          oldQuantity: oldQuantity,
-          newQuantity: newQuantity,
-          userId: user.uid,
-          itemName: diaperInfo?.name
-        }
-      };
-      addNotification(notification);
-
-      // Email Notification
+    if (typeof navigator === 'undefined' || navigator.onLine) {
       const subject = `[Lista] Ajustement Manuel du Stock - ${diaperInfo?.name}`;
       const textBody = `Le stock de ${diaperInfo?.name} a été ajusté manuellement par ${userProfile?.displayName || user.email}.\nAncienne quantité: ${oldQuantity} pièces.\nNouvelle quantité: ${newQuantity} pièces.\nÉcart: ${newQuantity - oldQuantity} pièces.`;
       const htmlBody = `
@@ -284,87 +212,37 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
                 <li><strong>Nouvelle quantité :</strong> ${newQuantity} pièces</li>
                 <li><strong>Écart :</strong> ${newQuantity - oldQuantity} pièces</li>
             </ul>
-        `;
+      `;
       sendTransactionalEmail({ subject: subject, text: textBody, html: htmlBody });
-
-      // Check for low stock
-      if (diaperInfo) {
-        checkLowStockAndNotify(diaperInfo, oldQuantity, newQuantity);
-      }
-
-    } catch (error) {
-      console.error("Manual stock update failed:", error);
-      const permissionError = new FirestorePermissionError({
-        path: stockDocRef.path,
-        operation: 'write',
-        requestResourceData: { quantity: newQuantity },
-      });
-      errorEmitter.emit('permission-error', permissionError);
     }
-  }, [firestore, user, userProfile, diapers, addNotification, checkLowStockAndNotify]);
+  }, [firestore, user, userProfile, diapers, stock]);
 
   const directStockDistribution = React.useCallback(async (items: DeliveryItem[], reason: string, details?: { recipientName?: string; comment?: string }) => {
     if (!firestore || !user) throw new Error("Firestore not initialized");
+    for (const item of items) {
+      const available = (stock || []).find(stockItem => stockItem.diaperId === item.diaperId)?.quantity || 0;
+      if (item.quantity > available) {
+        const diaperName = diapers.find(diaper => diaper.id === item.diaperId)?.name || 'Article';
+        throw new Error(`Stock insuffisant pour ${diaperName} : ${available} pièce(s) disponible(s).`);
+      }
+    }
 
-    try {
-      await runTransaction(firestore, async (transaction) => {
-        const stockUpdates = [];
+    const distributionRef = doc(collection(firestore, 'directDistributions'));
+    const notificationRef = doc(collection(firestore, 'notifications'));
+    const batch = writeBatch(firestore);
+    for (const item of items) {
+      batch.set(doc(firestore, 'stock', item.diaperId), {
+        diaperId: item.diaperId,
+        quantity: increment(-item.quantity),
+        modifiedAt: serverTimestamp(),
+      }, { merge: true });
+    }
 
-        // Phase 1: Read all data
-        for (const item of items) {
-          const stockDocRef = doc(firestore, 'stock', item.diaperId);
-          const stockDoc = await transaction.get(stockDocRef);
-          const diaperInfo = diapers.find(d => d.id === item.diaperId);
+    const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+    const itemsCount = items.length;
+    const description = `🚚 ${userProfile?.displayName || user.email} a effectué une distribution directe de ${totalItems} pièces (${itemsCount} article(s) différent(s)). Motif: "${reason}"`;
 
-          if (stockDoc.exists() && diaperInfo) {
-            const currentQuantity = stockDoc.data().quantity || 0;
-            const newQuantity = Math.max(0, currentQuantity - item.quantity);
-            stockUpdates.push({
-              ref: stockDocRef,
-              newQuantity: newQuantity,
-              diaperInfo: diaperInfo,
-              oldQuantity: currentQuantity,
-            });
-          } else {
-            console.warn(`Stock document for item ${item.diaperId} not found. Cannot deduct stock.`);
-          }
-        }
-
-        // Phase 2: Perform all writes
-        for (const update of stockUpdates) {
-          transaction.update(update.ref, {
-            quantity: update.newQuantity,
-            modifiedAt: serverTimestamp(),
-          });
-        }
-
-        // Phase 3: Trigger notifications
-        for (const update of stockUpdates) {
-          checkLowStockAndNotify(update.diaperInfo, update.oldQuantity, update.newQuantity);
-        }
-      });
-
-      const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
-      const itemsCount = items.length;
-      const description = `🚚 ${userProfile?.displayName || user.email} a effectué une distribution directe de ${totalItems} pièces (${itemsCount} article(s) différent(s)). Motif: "${reason}"`;
-
-      // In-app Notification
-      const notification = {
-        type: 'info' as const,
-        title: '📤 Distribution directe de stock',
-        description: description,
-        data: {
-          userId: user.uid,
-          items,
-          reason,
-          recipientName: details?.recipientName || null,
-          comment: details?.comment || null,
-          directDistributionKind: 'external-person',
-        }
-      };
-      addNotification(notification);
-
-      addDocumentNonBlocking(collection(firestore, 'directDistributions'), {
+    batch.set(distributionRef, {
         userId: user.uid,
         userName: userProfile?.displayName || user.email || null,
         items,
@@ -376,9 +254,35 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
         source: 'direct-stock-distribution',
         date: serverTimestamp(),
         createdAt: serverTimestamp(),
+        clientOperationId: distributionRef.id,
       });
 
-      // Email Notification
+    batch.set(notificationRef, {
+      type: 'info',
+      title: '📤 Distribution directe de stock',
+      description,
+      data: {
+        distributionId: distributionRef.id,
+        userId: user.uid,
+        items,
+        reason,
+        recipientName: details?.recipientName || null,
+        comment: details?.comment || null,
+        directDistributionKind: 'external-person',
+      },
+      date: serverTimestamp(),
+      read: false,
+    });
+
+    queueFirestoreWrite({
+      id: `distribution:${distributionRef.id}`,
+      type: 'distribution',
+      label: `Sortie directe - ${details?.recipientName || reason}`,
+      write: () => batch.commit(),
+      onError: error => console.error('Direct distribution sync failed:', error),
+    });
+
+    if (typeof navigator === 'undefined' || navigator.onLine) {
       const itemsListHtml = items.map(item => `<li>${diapers.find(d => d.id === item.diaperId)?.name || 'Article inconnu'}: ${item.quantity} pièces</li>`).join('');
       const subject = `[Lista] Distribution Directe - ${reason}`;
       const htmlBody = `
@@ -387,20 +291,10 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
             <p><strong>Raison :</strong> ${reason}</p>
             <p><strong>Articles distribués :</strong></p>
             <ul>${itemsListHtml}</ul>
-        `;
+      `;
       sendTransactionalEmail({ subject: subject, text: description, html: htmlBody });
-
-
-    } catch (error) {
-      console.error("Direct stock distribution failed:", error);
-      const permissionError = new FirestorePermissionError({
-        path: 'stock',
-        operation: 'write',
-        requestResourceData: { items },
-      });
-      errorEmitter.emit('permission-error', permissionError);
     }
-  }, [firestore, user, userProfile, addNotification, diapers, checkLowStockAndNotify]);
+  }, [firestore, user, userProfile, diapers, stock]);
 
   const value = { stock: stock || [], isLoading, updateStock, deductStockFromOrder, manualStockUpdate, directStockDistribution };
 
