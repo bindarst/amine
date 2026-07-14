@@ -171,6 +171,73 @@ export default function ReportsPage() {
 
     const legacyAdjustments = (notifications || []).filter(isStockAdjustmentNotification);
 
+    const orderNotificationAdjustments = (notifications || []).filter(notification => (
+      Boolean(notification.data?.orderId) &&
+      Number.isFinite(Number(notification.data?.oldQuantity)) &&
+      Number.isFinite(Number(notification.data?.newQuantity)) &&
+      (Boolean(notification.data?.adjustedBy) || Boolean(notification.data?.reason))
+    )).map(notification => {
+      const diaper = diapers.find(item => item.id === notification.data?.diaperId);
+      const relatedOrder = orders.find(order => order.id === notification.data?.orderId);
+      const orderItem = relatedOrder?.wardOrders.flatMap(wardOrder => wardOrder.items)
+        .find(item => item.diaperId === notification.data?.diaperId);
+      const multiplier = orderItem?.unit === 'cartons' ? diaper?.piecesPerCarton || 1 : 1;
+      return {
+        id: notification.id,
+        date: notification.date,
+        description: notification.data?.reason ? `Ajustement de commande. Raison : ${notification.data.reason}` : notification.description,
+        data: {
+          orderId: notification.data?.orderId,
+          diaperId: notification.data?.diaperId,
+          itemName: diaper?.name,
+          oldQuantity: Number(notification.data?.oldQuantity) * multiplier,
+          newQuantity: Number(notification.data?.newQuantity) * multiplier,
+          userId: notification.data?.userId,
+          userName: notification.data?.adjustedBy,
+        },
+      };
+    });
+
+    const orderAdjustmentSignatures = new Set(orderNotificationAdjustments.map(adjustment => [
+      adjustment.data.orderId || '',
+      adjustment.data.itemName || adjustment.data.diaperId || '',
+      adjustment.data.oldQuantity,
+      adjustment.data.newQuantity,
+      adjustment.data.userName || '',
+    ].join('|').toLowerCase()));
+
+    const commentAdjustments = orders.flatMap(order => {
+      const blocks = String(order.comment || '').match(/\[Ajustement\][\s\S]*?(?=(?:\r?\n){2,}\[Ajustement\]|$)/gi) || [];
+      return blocks.flatMap((block, index) => {
+        const itemMatch = block.match(/\[Ajustement\]\s*([^:\r\n]+)\s*:/i);
+        const quantitiesMatch = block.match(/:\s*(-?\d+(?:[.,]\d+)?)\s*(?:→|->|vers)\s*(-?\d+(?:[.,]\d+)?)/i);
+        if (!itemMatch || !quantitiesMatch) return [];
+        const itemName = itemMatch[1].trim();
+        const diaper = diapers.find(item => item.name.toLowerCase() === itemName.toLowerCase());
+        const unitIsCartons = /carton/i.test(block.slice(quantitiesMatch.index || 0));
+        const multiplier = unitIsCartons ? diaper?.piecesPerCarton || 1 : 1;
+        const oldQuantity = Number(quantitiesMatch[1].replace(',', '.')) * multiplier;
+        const newQuantity = Number(quantitiesMatch[2].replace(',', '.')) * multiplier;
+        const reason = block.match(/Raison\s*:\s*([\s\S]*?)\.\s*Par\s+/i)?.[1]?.trim();
+        const userName = block.match(/Par\s+([^\.\r\n]+)\.?/i)?.[1]?.trim() || 'Utilisateur inconnu';
+        const signature = [order.id, itemName, oldQuantity, newQuantity, userName].join('|').toLowerCase();
+        if (orderAdjustmentSignatures.has(signature)) return [];
+        return [{
+          id: `${order.id}-comment-adjustment-${index}`,
+          date: order.date,
+          description: reason ? `Ajustement de commande. Raison : ${reason}` : 'Ajustement de commande',
+          data: {
+            orderId: order.id,
+            diaperId: diaper?.id,
+            itemName,
+            oldQuantity,
+            newQuantity,
+            userName,
+          },
+        }];
+      });
+    });
+
     return [
       ...durableAdjustments,
       ...legacyAdjustments.filter(adjustment => !signatures.has([
@@ -180,8 +247,10 @@ export default function ReportsPage() {
         adjustment.data?.newQuantity ?? '',
         toDate(adjustment.date)?.getTime() || '',
       ].join('|'))),
+      ...orderNotificationAdjustments,
+      ...commentAdjustments,
     ];
-  }, [notifications, stockAdjustmentDocs]);
+  }, [notifications, stockAdjustmentDocs, diapers, orders]);
 
   const adjustments = React.useMemo(() => {
     if (!date?.from) return [];
