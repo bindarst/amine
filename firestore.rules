@@ -118,6 +118,11 @@ service cloud.firestore {
         allow create, update, delete: if true;
     }
 
+    match /stockAdjustments/{adjustmentId} {
+        allow get, list: if true;
+        allow create, update, delete: if true;
+    }
+
     /**
      * @description Controls access to the 'mail' collection for sending emails.
      * @path /mail/{mailId}

@@ -168,6 +168,7 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
     const oldQuantity = (stock || []).find(item => item.diaperId === diaperId)?.quantity || 0;
     const diaperInfo = diapers.find(d => d.id === diaperId);
     const notificationRef = doc(collection(firestore, 'notifications'));
+    const adjustmentRef = doc(collection(firestore, 'stockAdjustments'));
     const difference = newQuantity - oldQuantity;
     const action = difference > 0 ? 'augmenté' : 'diminué';
     const description = `🔧 ${userProfile?.displayName || user.email} a ${action} le stock de "${diaperInfo?.name || 'un article'}" : ${oldQuantity} → ${newQuantity} pièces (${difference > 0 ? '+' : ''}${difference}).`;
@@ -190,6 +191,18 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
       },
       date: serverTimestamp(),
       read: false,
+    });
+    batch.set(adjustmentRef, {
+      diaperId,
+      itemName: diaperInfo?.name || 'Article inconnu',
+      oldQuantity,
+      newQuantity,
+      difference,
+      userId: user.uid,
+      userName: userProfile?.displayName || user.email || 'Utilisateur inconnu',
+      description,
+      date: serverTimestamp(),
+      createdAt: serverTimestamp(),
     });
 
     queueFirestoreWrite({

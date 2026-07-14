@@ -143,7 +143,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         }
 
         const notifsCollectionRef = collection(firestore, 'notifications');
-        const adjustmentsQuery = query(notifsCollectionRef, where('title', 'in', ['Ajustement manuel du stock', 'Distribution Directe de Stock']));
+        const adjustmentsQuery = query(notifsCollectionRef, where('title', 'in', [
+          'Ajustement manuel du stock',
+          '⚙️ Ajustement manuel du stock',
+          'Distribution Directe de Stock',
+          '📤 Distribution directe de stock',
+        ]));
         
         const querySnapshot = await getDocs(adjustmentsQuery);
         

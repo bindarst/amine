@@ -25,6 +25,7 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { sendTransactionalEmail } from '@/lib/actions';
 import { queueFirestoreWrite } from '@/lib/offline-sync';
+import { getOrderStatusLabel } from '@/lib/order-status';
 
 interface OrdersContextType {
   orders: WithId<Order>[];
@@ -263,7 +264,7 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
         if (updates.comment) {
           description += `💬 Nouveau commentaire: "${updates.comment}"`
         } else if (updates.status) {
-          description += `Statut mis à jour: ${updates.status}`
+          description += `Statut mis à jour : ${getOrderStatusLabel(updates.status)}`
         } else {
           description += 'Informations mises à jour.'
         }

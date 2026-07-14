@@ -27,6 +27,8 @@ import { useFirebase, useMemoFirebase } from '@/firebase';
 import { useCollection } from '@/firebase/firestore/use-collection';
 import { collection, orderBy, query } from 'firebase/firestore';
 import type { Notification } from '@/lib/types';
+import { getOrderStatusLabel, getOrderUnitLabel } from '@/lib/order-status';
+import { isStockAdjustmentNotification } from '@/lib/stock-adjustments';
 
 type ReportDirectDistribution = {
   id: string;
@@ -49,6 +51,24 @@ function toDate(value: any): Date | null {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
   return null;
+}
+
+function formatPdfNumber(value: number): string {
+  return Math.round(value).toString();
+}
+
+function sanitizePdfText(value: unknown): string {
+  return String(value ?? '-')
+    .replace(/[\u00a0\u202f]/g, ' ')
+    .replace(/[→⇒]/g, ' vers ')
+    .replace(/[“”]/g, '"')
+    .replace(/[’]/g, "'")
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(line => line.replace(/[\t ]+/g, ' ').trim())
+    .join('\n')
+    .trim() || '-';
 }
 
 export default function ReportsPage() {
@@ -87,7 +107,25 @@ export default function ReportsPage() {
     items?: { diaperId: string; quantity: number; unit?: 'pieces' | 'cartons' }[];
   }>(directDistributionsQuery);
 
-  const isLoading = isOrdersLoading || isItemsLoading || isWardsLoading || isUsersLoading || isNotificationsLoading || isDirectDistributionsLoading;
+  const stockAdjustmentsQuery = useMemoFirebase(() => {
+    if (!firestore || !user) return null;
+    return query(collection(firestore, 'stockAdjustments'), orderBy('date', 'desc'));
+  }, [firestore, user]);
+
+  const { data: stockAdjustmentDocs, isLoading: isStockAdjustmentsLoading } = useCollection<{
+    date?: any;
+    createdAt?: any;
+    diaperId?: string;
+    itemName?: string;
+    oldQuantity?: number;
+    newQuantity?: number;
+    difference?: number;
+    userId?: string;
+    userName?: string;
+    description?: string;
+  }>(stockAdjustmentsQuery);
+
+  const isLoading = isOrdersLoading || isItemsLoading || isWardsLoading || isUsersLoading || isNotificationsLoading || isDirectDistributionsLoading || isStockAdjustmentsLoading;
 
   const chartRefs = {
     consumptionOverTime: React.useRef(null),
@@ -108,34 +146,71 @@ export default function ReportsPage() {
     });
   }, [orders, date]);
 
-  const adjustments = React.useMemo(() => {
-    if (!notifications) return [];
-    if (!date?.from) return [];
+  const allAdjustmentRecords = React.useMemo(() => {
+    const durableAdjustments = (stockAdjustmentDocs || []).map(adjustment => ({
+      id: adjustment.id,
+      date: adjustment.date || adjustment.createdAt,
+      description: adjustment.description,
+      data: {
+        diaperId: adjustment.diaperId,
+        itemName: adjustment.itemName,
+        oldQuantity: adjustment.oldQuantity,
+        newQuantity: adjustment.newQuantity,
+        userId: adjustment.userId,
+        userName: adjustment.userName,
+      },
+    }));
 
+    const signatures = new Set(durableAdjustments.map(adjustment => [
+      adjustment.data.diaperId || '',
+      adjustment.data.userId || '',
+      adjustment.data.oldQuantity ?? '',
+      adjustment.data.newQuantity ?? '',
+      toDate(adjustment.date)?.getTime() || '',
+    ].join('|')));
+
+    const legacyAdjustments = (notifications || []).filter(isStockAdjustmentNotification);
+
+    return [
+      ...durableAdjustments,
+      ...legacyAdjustments.filter(adjustment => !signatures.has([
+        adjustment.data?.diaperId || '',
+        adjustment.data?.userId || '',
+        adjustment.data?.oldQuantity ?? '',
+        adjustment.data?.newQuantity ?? '',
+        toDate(adjustment.date)?.getTime() || '',
+      ].join('|'))),
+    ];
+  }, [notifications, stockAdjustmentDocs]);
+
+  const adjustments = React.useMemo(() => {
+    if (!date?.from) return [];
     const fromDate = date.from;
     const toDate = date.to ? addDays(date.to, 1) : addDays(new Date(), 1);
-
-    return notifications.filter(notif =>
-      notif.type === 'info' &&
-      notif.title === 'Ajustement manuel du stock' &&
-      notif.date.toDate() >= fromDate &&
-      notif.date.toDate() < toDate
-    );
-  }, [notifications, date]);
+    return allAdjustmentRecords.filter(adjustment => {
+      const adjustmentDate = toDate(adjustment.date);
+      return adjustmentDate !== null && adjustmentDate >= fromDate && adjustmentDate < toDate;
+    });
+  }, [allAdjustmentRecords, date]);
 
   const detailedAdjustments = React.useMemo(() => {
     if (!adjustments || !diapers || !users) return [];
     return adjustments.map(adj => {
-      const item = diapers.find(d => d.id === adj.data.diaperId);
-      const user = users.find(u => u.id === adj.data.userId);
-      const difference = adj.data.newQuantity - adj.data.oldQuantity;
+      const item = diapers.find(d => d.id === adj.data?.diaperId);
+      const user = users.find(u => u.id === adj.data?.userId);
+      const oldQuantity = Number(adj.data?.oldQuantity ?? 0);
+      const newQuantity = Number(adj.data?.newQuantity ?? 0);
+      const difference = newQuantity - oldQuantity;
       return {
         ...adj,
-        itemName: item?.name || 'Article inconnu',
-        userName: user?.displayName || 'Utilisateur inconnu',
-        difference: difference,
+        itemName: item?.name || adj.data?.itemName || 'Article inconnu',
+        userName: user?.displayName || adj.data?.userName || 'Utilisateur inconnu',
+        oldQuantity,
+        newQuantity,
+        difference,
+        detail: adj.description || (difference > 0 ? 'Augmentation du stock' : difference < 0 ? 'Diminution du stock' : 'Stock inchangé'),
       };
-    }).sort((a, b) => b.date.toDate().getTime() - a.date.toDate().getTime());
+    }).sort((a, b) => (toDate(b.date)?.getTime() || 0) - (toDate(a.date)?.getTime() || 0));
   }, [adjustments, diapers, users]);
 
   const allDirectDistributions = React.useMemo<ReportDirectDistribution[]>(() => {
@@ -262,7 +337,7 @@ export default function ReportsPage() {
     });
 
     const mostMissingItemData = Object.entries(adjustmentStats).sort((a, b) => b[1] - a[1]);
-    const mostMissingItem = mostMissingItemData.length > 0 ? `${mostMissingItemData[0][0]} (-${mostMissingItemData[0][1]})` : 'N/A';
+    const mostMissingItem = mostMissingItemData.length > 0 ? `${mostMissingItemData[0][0]} (-${mostMissingItemData[0][1]})` : 'Aucune donnée';
 
     const consumptionData = Object.entries(consumption).map(([name, value]) => ({ name, total: value })).sort((a, b) => b.total - a.total);
     const wardDistributionData = Object.entries(wardDistribution).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
@@ -271,7 +346,7 @@ export default function ReportsPage() {
     const totalOrders = filteredOrders.length;
     const totalDirectDistributions = directDistributions.length;
     const totalPieces = consumptionData.reduce((sum, item) => sum + item.total, 0);
-    const mostOrderedItem = consumptionData.length > 0 ? consumptionData[0].name : 'N/A';
+    const mostOrderedItem = consumptionData.length > 0 ? consumptionData[0].name : 'Aucune donnée';
     const uniqueWeeks = Object.keys(consumptionOverTime).length;
     const avgConsumption = uniqueWeeks > 0 ? Math.round(totalPieces / uniqueWeeks) : 0;
 
@@ -300,7 +375,7 @@ export default function ReportsPage() {
       doc.setTextColor(...ink);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(13);
-      doc.text(title, margin, y);
+      doc.text(sanitizePdfText(title), margin, y);
       doc.setDrawColor(...primary);
       doc.setLineWidth(0.7);
       doc.line(margin, y + 2.5, margin + 28, y + 2.5);
@@ -309,7 +384,7 @@ export default function ReportsPage() {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
         doc.setTextColor(100, 108, 120);
-        doc.text(subtitle, margin, y);
+        doc.text(sanitizePdfText(subtitle), margin, y);
         y += 6;
       }
     };
@@ -317,11 +392,11 @@ export default function ReportsPage() {
     const addTable = (head: string[], body: (string | number)[][], widths?: Record<number, number>) => {
       autoTable(doc, {
         startY: y,
-        head: [head],
-        body,
+        head: [head.map(sanitizePdfText)],
+        body: body.map(row => row.map(sanitizePdfText)),
         margin: { left: margin, right: margin },
         theme: 'grid',
-        styles: { fontSize: 7.2, cellPadding: 1.6, overflow: 'linebreak', textColor: ink },
+        styles: { fontSize: 6.8, cellPadding: 1.4, overflow: 'linebreak', textColor: ink, valign: 'top' },
         headStyles: { fillColor: primary, textColor: 255, fontStyle: 'bold', lineColor: primary },
         alternateRowStyles: { fillColor: [245, 248, 250] },
         columnStyles: Object.fromEntries(
@@ -356,7 +431,8 @@ export default function ReportsPage() {
       const labelWidth = 48;
       const barWidth = contentWidth - labelWidth - 21;
       data.forEach(item => {
-        const label = item.name.length > 27 ? `${item.name.slice(0, 26)}…` : item.name;
+        const cleanName = sanitizePdfText(item.name);
+        const label = cleanName.length > 27 ? `${cleanName.slice(0, 26)}...` : cleanName;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.2);
         doc.setTextColor(55, 65, 81);
@@ -367,7 +443,7 @@ export default function ReportsPage() {
         doc.roundedRect(margin + labelWidth, y, Math.max(1, (item.value / max) * barWidth), 4.2, 1, 1, 'F');
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...ink);
-        doc.text(item.value.toLocaleString('fr-FR'), pageWidth - margin, y + 3.2, { align: 'right' });
+        doc.text(formatPdfNumber(item.value), pageWidth - margin, y + 3.2, { align: 'right' });
         y += 6.5;
       });
       y += 4;
@@ -399,7 +475,7 @@ export default function ReportsPage() {
         doc.line(chartX, gridY, chartX + chartW, gridY);
         doc.setFontSize(6.5);
         doc.setTextColor(110);
-        doc.text(Math.round(max * (1 - grid / 4)).toLocaleString('fr-FR'), chartX - 2, gridY + 1.5, { align: 'right' });
+        doc.text(formatPdfNumber(max * (1 - grid / 4)), chartX - 2, gridY + 1.5, { align: 'right' });
       }
       doc.setDrawColor(...primary);
       doc.setFillColor(...primary);
@@ -434,7 +510,7 @@ export default function ReportsPage() {
     doc.setFontSize(9);
     doc.text('Lista - Gestion logistique', margin, 23);
     doc.setTextColor(205, 214, 224);
-    doc.text(`Généré le ${new Date().toLocaleString('fr-FR')}`, pageWidth - margin, 16, { align: 'right' });
+    doc.text(`Généré le ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, pageWidth - margin, 16, { align: 'right' });
     const periodStart = date?.from ? format(date.from, 'dd/MM/yyyy') : 'début';
     const periodEnd = date?.to ? format(date.to, 'dd/MM/yyyy') : periodStart;
     doc.text(`Période du ${periodStart} au ${periodEnd}`, pageWidth - margin, 23, { align: 'right' });
@@ -475,12 +551,12 @@ export default function ReportsPage() {
 
     addSection('Synthèse exécutive', 'Les chiffres incluent les commandes et les distributions directes de la période.');
     const metrics = [
-      ['Commandes', statsData.totalOrders.toLocaleString('fr-FR')],
-      ['Sorties directes', statsData.totalDirectDistributions.toLocaleString('fr-FR')],
-      ['Pièces sorties', statsData.totalPieces.toLocaleString('fr-FR')],
-      ['Moyenne / semaine', statsData.avgConsumption.toLocaleString('fr-FR')],
+      ['Commandes', formatPdfNumber(statsData.totalOrders)],
+      ['Sorties directes', formatPdfNumber(statsData.totalDirectDistributions)],
+      ['Pièces sorties', formatPdfNumber(statsData.totalPieces)],
+      ['Moyenne / semaine', formatPdfNumber(statsData.avgConsumption)],
       ['Article principal', statsData.mostOrderedItem],
-      ['Pièces manquantes', statsData.totalMissing.toLocaleString('fr-FR')],
+      ['Pièces manquantes', formatPdfNumber(statsData.totalMissing)],
     ];
     metrics.forEach((metric, index) => {
       const column = index % 3;
@@ -516,9 +592,9 @@ export default function ReportsPage() {
       statsData.consumption.map((item, index) => [
         index + 1,
         item.name,
-        item.total.toLocaleString('fr-FR'),
+        formatPdfNumber(item.total),
         statsData.totalPieces ? `${((item.total / statsData.totalPieces) * 100).toFixed(1)} %` : '0 %',
-        Math.round(item.total / weeks).toLocaleString('fr-FR'),
+        formatPdfNumber(item.total / weeks),
       ]),
       { 0: 12, 1: 76, 2: 28, 3: 24, 4: 34 }
     );
@@ -528,10 +604,10 @@ export default function ReportsPage() {
       ['Étage / origine', 'Pièces', 'Part du total'],
       statsData.wardDistribution.map(item => [
         item.name,
-        item.value.toLocaleString('fr-FR'),
+        formatPdfNumber(item.value),
         statsData.totalPieces ? `${((item.value / statsData.totalPieces) * 100).toFixed(1)} %` : '0 %',
       ]),
-      { 0: 100, 1: 40, 2: 40 }
+      { 0: 96, 1: 39, 2: 39 }
     );
 
     addSection('Évolution par semaine');
@@ -540,7 +616,7 @@ export default function ReportsPage() {
       statsData.consumptionOverTime.map((item, index, values) => {
         const previous = index > 0 ? values[index - 1].total : 0;
         const variation = previous ? ((item.total - previous) / previous) * 100 : 0;
-        return [format(parseISO(item.date), 'dd/MM/yyyy'), item.total.toLocaleString('fr-FR'), index ? `${variation >= 0 ? '+' : ''}${variation.toFixed(1)} %` : '-'];
+        return [format(parseISO(item.date), 'dd/MM/yyyy'), formatPdfNumber(item.total), index ? `${variation >= 0 ? '+' : ''}${variation.toFixed(1)} %` : '-'];
       }),
       { 0: 70, 1: 50, 2: 50 }
     );
@@ -561,15 +637,15 @@ export default function ReportsPage() {
           return sum + (item.unit === 'cartons' && diaper ? item.quantity * diaper.piecesPerCarton : item.quantity);
         }, 0);
         return [
-          distributionDate?.toLocaleString('fr-FR') || '-',
+          distributionDate ? format(distributionDate, 'dd/MM/yyyy HH:mm') : '-',
           distribution.data.recipientName || 'Non précisée',
           operationUser?.displayName || 'Utilisateur inconnu',
           distribution.data.comment || distribution.data.reason || '-',
           articleDetails.join('\n'),
-          total.toLocaleString('fr-FR'),
+          formatPdfNumber(total),
         ];
       }),
-      { 0: 28, 1: 25, 2: 25, 3: 38, 4: 52, 5: 18 }
+      { 0: 26, 1: 23, 2: 23, 3: 36, 4: 50, 5: 16 }
     );
 
     addSection('Commandes détaillées', `${filteredOrders.length} commande(s) sur la période.`);
@@ -590,27 +666,28 @@ export default function ReportsPage() {
           new Date(order.date).toLocaleDateString('fr-FR'),
           wardNames.join(', '),
           orderUser?.displayName || 'Utilisateur inconnu',
-          order.status,
+          getOrderStatusLabel(order.status),
           articleLines.join('\n'),
-          total.toLocaleString('fr-FR'),
+          formatPdfNumber(total),
           order.comment || '-',
         ];
       }),
-      { 0: 19, 1: 28, 2: 24, 3: 19, 4: 48, 5: 16, 6: 30 }
+      { 0: 18, 1: 25, 2: 23, 3: 18, 4: 46, 5: 14, 6: 30 }
     );
 
-    addSection('Ajustements manuels', `${detailedAdjustments.length} ajustement(s), dont ${statsData.totalMissing.toLocaleString('fr-FR')} pièce(s) manquante(s).`);
+    addSection('Ajustements manuels', `${detailedAdjustments.length} ajustement(s), dont ${formatPdfNumber(statsData.totalMissing)} pièce(s) manquante(s).`);
     addTable(
-      ['Date et heure', 'Article', 'Utilisateur', 'Avant', 'Après', 'Écart'],
+      ['Date et heure', 'Article', 'Effectué par', 'Avant', 'Après', 'Écart', 'Détail'],
       detailedAdjustments.map(adjustment => [
-        toDate(adjustment.date)?.toLocaleString('fr-FR') || '-',
+        toDate(adjustment.date) ? format(toDate(adjustment.date)!, 'dd/MM/yyyy HH:mm') : '-',
         adjustment.itemName,
         adjustment.userName,
-        adjustment.data.oldQuantity.toLocaleString('fr-FR'),
-        adjustment.data.newQuantity.toLocaleString('fr-FR'),
-        `${adjustment.difference > 0 ? '+' : ''}${adjustment.difference.toLocaleString('fr-FR')}`,
+        formatPdfNumber(adjustment.oldQuantity),
+        formatPdfNumber(adjustment.newQuantity),
+        `${adjustment.difference > 0 ? '+' : ''}${formatPdfNumber(adjustment.difference)}`,
+        adjustment.detail,
       ]),
-      { 0: 33, 1: 48, 2: 38, 3: 20, 4: 20, 5: 20 }
+      { 0: 29, 1: 34, 2: 28, 3: 15, 4: 15, 5: 15, 6: 38 }
     );
 
     const pageCount = doc.getNumberOfPages();
@@ -651,7 +728,7 @@ export default function ReportsPage() {
     const quarterEnd = endOfQuarter(now);
     const q = getQuarter(now);
     const year = now.getFullYear();
-    const quarterLabel = `Q${q} ${year}`;
+    const quarterLabel = `T${q} ${year}`;
 
     const ordersInQuarter = (orders ?? []).filter(order => {
       const orderDate = new Date(order.date);
@@ -665,12 +742,12 @@ export default function ReportsPage() {
         distributionDate <= quarterEnd;
     });
 
-    const adjustmentsInQuarter = (notifications ?? []).filter(notif =>
-      notif.type === 'info' &&
-      notif.title === 'Ajustement manuel du stock' &&
-      notif.date.toDate() >= quarterStart &&
-      notif.date.toDate() <= quarterEnd
-    );
+    const adjustmentsInQuarter = allAdjustmentRecords.filter(adjustment => {
+      const adjustmentDate = toDate(adjustment.date);
+      return adjustmentDate !== null &&
+        adjustmentDate >= quarterStart &&
+        adjustmentDate <= quarterEnd;
+    });
 
     const consumption: { [key: string]: number } = {};
     const wardDistribution: { [key: string]: number } = {};
@@ -708,7 +785,7 @@ export default function ReportsPage() {
     });
 
     const consumptionSorted = Object.entries(consumption).map(([name, value]) => ({ name, total: value })).sort((a, b) => b.total - a.total);
-    const mostOrderedItem = consumptionSorted.length > 0 ? consumptionSorted[0].name : 'N/A';
+    const mostOrderedItem = consumptionSorted.length > 0 ? consumptionSorted[0].name : 'Aucune donnée';
     const weeksInQuarter = 13;
     const avgConsumption = Math.round(totalPieces / weeksInQuarter);
 
@@ -723,9 +800,9 @@ export default function ReportsPage() {
       }
     });
     const mostMissingEntry = Object.entries(adjustmentStats).sort((a, b) => b[1] - a[1])[0];
-    const mostMissingItem = mostMissingEntry ? `${mostMissingEntry[0]} (-${mostMissingEntry[1]})` : 'N/A';
+    const mostMissingItem = mostMissingEntry ? `${mostMissingEntry[0]} (-${mostMissingEntry[1]})` : 'Aucune donnée';
 
-    const doc = new jsPDF();
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
     let y = 22;
 
     doc.setFontSize(20);
@@ -746,17 +823,18 @@ export default function ReportsPage() {
     const summaryRows = [
       ['Distributions directes', directDistributionsInQuarter.length.toString()],
       ['Nombre de commandes', ordersInQuarter.length.toString()],
-      ['Total pièces distribuées', totalPieces.toLocaleString('fr-FR')],
-      ['Consommation moyenne / semaine', `${avgConsumption.toLocaleString('fr-FR')} pièces`],
+      ['Total pièces distribuées', formatPdfNumber(totalPieces)],
+      ['Consommation moyenne / semaine', `${formatPdfNumber(avgConsumption)} pièces`],
       ['Article le plus commandé', mostOrderedItem],
-      ['Pièces manquantes (ajustements)', totalMissing.toLocaleString('fr-FR')],
+      ['Pièces manquantes (ajustements)', formatPdfNumber(totalMissing)],
       ['Article le plus manquant', mostMissingItem],
     ];
     autoTable(doc, {
       startY: y,
       head: [['Indicateur', 'Valeur']],
-      body: summaryRows,
+      body: summaryRows.map(row => row.map(sanitizePdfText)),
       theme: 'striped',
+      styles: { overflow: 'linebreak', valign: 'top' },
     });
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 12;
 
@@ -771,8 +849,9 @@ export default function ReportsPage() {
       autoTable(doc, {
         startY: y,
         head: [['Article', 'Pièces']],
-        body: consumptionSorted.slice(0, 10).map(c => [c.name, c.total.toLocaleString('fr-FR')]),
+        body: consumptionSorted.slice(0, 10).map(c => [sanitizePdfText(c.name), formatPdfNumber(c.total)]),
         theme: 'striped',
+        styles: { overflow: 'linebreak', valign: 'top' },
       });
       y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 12;
     }
@@ -783,13 +862,15 @@ export default function ReportsPage() {
       const oldQ = adj.data?.oldQuantity ?? 0;
       const newQ = adj.data?.newQuantity ?? 0;
       const diff = newQ - oldQ;
+      const adjustmentDate = toDate(adj.date);
       return [
-        format(adj.date.toDate(), 'dd/MM/yyyy HH:mm', { locale: fr }),
-        item?.name ?? 'Inconnu',
-        user?.displayName ?? 'Inconnu',
-        oldQ.toString(),
-        newQ.toString(),
-        diff > 0 ? `+${diff}` : diff.toString(),
+        adjustmentDate ? format(adjustmentDate, 'dd/MM/yyyy HH:mm', { locale: fr }) : '-',
+        item?.name ?? adj.data?.itemName ?? 'Inconnu',
+        user?.displayName ?? adj.data?.userName ?? 'Utilisateur inconnu',
+        formatPdfNumber(oldQ),
+        formatPdfNumber(newQ),
+        diff > 0 ? `+${formatPdfNumber(diff)}` : formatPdfNumber(diff),
+        adj.description || '-',
       ];
     });
     if (detailedAdj.length > 0) {
@@ -802,9 +883,19 @@ export default function ReportsPage() {
       y += 6;
       autoTable(doc, {
         startY: y,
-        head: [['Date', 'Article', 'Utilisateur', 'Avant', 'Après', 'Écart']],
-        body: detailedAdj,
+        head: [['Date', 'Article', 'Effectué par', 'Avant', 'Après', 'Écart', 'Détail']],
+        body: detailedAdj.map(row => row.map(sanitizePdfText)),
         theme: 'striped',
+        styles: { fontSize: 7, overflow: 'linebreak', valign: 'top' },
+        columnStyles: {
+          0: { cellWidth: 27 },
+          1: { cellWidth: 34 },
+          2: { cellWidth: 28 },
+          3: { cellWidth: 15 },
+          4: { cellWidth: 15 },
+          5: { cellWidth: 15 },
+          6: { cellWidth: 40 },
+        },
       });
     }
 
@@ -831,9 +922,9 @@ export default function ReportsPage() {
             ward?.name || 'Inconnu',
             diaper?.name || 'Inconnu',
             item.quantity,
-            item.unit,
+            getOrderUnitLabel(item.unit),
             totalPieces,
-            order.status,
+            getOrderStatusLabel(order.status),
             creator?.displayName || 'Inconnu'
           ];
           csvContent += row.join(";") + "\r\n";
@@ -851,7 +942,7 @@ export default function ReportsPage() {
           distribution.data?.recipientName || 'Sortie directe',
           diaper?.name || 'Inconnu',
           item.quantity,
-          item.unit || 'pieces',
+          getOrderUnitLabel(item.unit),
           totalPieces,
           'sortie directe',
           creator?.displayName || 'Inconnu'
@@ -993,25 +1084,27 @@ export default function ReportsPage() {
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Article</TableHead>
-                  <TableHead>Utilisateur</TableHead>
+                  <TableHead>Effectué par</TableHead>
                   <TableHead className="text-center">Avant</TableHead>
                   <TableHead className="text-center">Après</TableHead>
                   <TableHead className="text-center">Écart</TableHead>
+                  <TableHead>Détail</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {detailedAdjustments.map(adj => (
                   <TableRow key={adj.id}>
-                    <TableCell className="whitespace-nowrap">{new Date(adj.date.toDate()).toLocaleString('fr-FR')}</TableCell>
+                    <TableCell className="whitespace-nowrap">{toDate(adj.date)?.toLocaleString('fr-FR') || '-'}</TableCell>
                     <TableCell className="font-medium whitespace-nowrap">{adj.itemName}</TableCell>
                     <TableCell className="text-muted-foreground whitespace-nowrap">{adj.userName}</TableCell>
-                    <TableCell className="text-center">{adj.data.oldQuantity}</TableCell>
-                    <TableCell className="text-center">{adj.data.newQuantity}</TableCell>
+                    <TableCell className="text-center">{adj.oldQuantity}</TableCell>
+                    <TableCell className="text-center">{adj.newQuantity}</TableCell>
                     <TableCell className="text-center">
                       <Badge variant={adj.difference > 0 ? 'success' : 'destructive'}>
                         {adj.difference > 0 ? `+${adj.difference}` : adj.difference}
                       </Badge>
                     </TableCell>
+                    <TableCell className="min-w-64 whitespace-normal text-sm text-muted-foreground">{adj.detail}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -8,6 +8,7 @@ import type { Order, Delivery, Notification, Diaper, UserProfile, WithId } from 
 import { ArrowDownLeft, ArrowUpRight, Box, Edit, ShoppingCart, Truck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { isStockAdjustmentNotification } from '@/lib/stock-adjustments';
 import {
   Tooltip,
   TooltipContent,
@@ -106,13 +107,16 @@ export default function ItemMovementHistory({ itemId, orders, deliveries, notifi
 
     // 3. Process Notifications for adjustments and direct distributions
     notifications.forEach(notif => {
-      if (notif.type === 'info' && (notif.title === 'Ajustement manuel du stock' || notif.title === 'Distribution Directe de Stock')) {
+      const isAdjustment = isStockAdjustmentNotification(notif);
+      const isDirectDistribution = Array.isArray(notif.data?.items) &&
+        String(notif.title || '').toLowerCase().includes('distribution directe');
+      if (notif.type === 'info' && (isAdjustment || isDirectDistribution)) {
         let quantityInPieces = 0;
         let movementType: 'Entrée' | 'Sortie' | undefined;
         let eventType: 'Ajustement' | 'Distribution Directe' | undefined;
         let detailsText = '';
 
-        if (notif.title === 'Ajustement manuel du stock' && notif.data?.diaperId === itemId) {
+        if (isAdjustment && notif.data?.diaperId === itemId) {
             eventType = 'Ajustement';
             const diff = notif.data.newQuantity - notif.data.oldQuantity;
             quantityInPieces = Math.abs(diff);
@@ -126,7 +130,7 @@ export default function ItemMovementHistory({ itemId, orders, deliveries, notifi
             }
             detailsText = `Écart: ${displayDiff > 0 ? '+' : ''}${displayDiff % 1 !== 0 ? displayDiff.toFixed(1) : displayDiff} ${displayUnitText}`;
 
-        } else if (notif.title === 'Distribution Directe de Stock' && notif.data?.items) {
+        } else if (isDirectDistribution && notif.data?.items) {
             const relevantItem = notif.data.items.find((i: any) => i.diaperId === itemId);
             if (relevantItem) {
                 eventType = 'Distribution Directe';

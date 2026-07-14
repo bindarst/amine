@@ -20,6 +20,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Day, type DayProps } from 'react-day-picker';
 import { Button } from '@/components/ui/button';
 import { useItems } from '../settings/items-context';
+import { getOrderStatusLabel } from '@/lib/order-status';
+import { isStockAdjustmentNotification } from '@/lib/stock-adjustments';
 
 type AgendaEvent = (
     | { type: 'order'; data: Order }
@@ -107,7 +109,7 @@ export default function AgendaPage() {
                 data: order,
                 date: parseISO(order.date),
                 title: `Commande - ${totalPieces.toLocaleString('fr-FR')} pièces`,
-                description: `Statut: ${order.status}`,
+                description: `Statut : ${getOrderStatusLabel(order.status)}`,
                 creator: creator?.displayName ?? undefined,
             });
         });
@@ -128,7 +130,7 @@ export default function AgendaPage() {
         });
 
         notifications
-            .filter(n => n.type === 'info' && n.title === 'Ajustement manuel du stock')
+            .filter(isStockAdjustmentNotification)
             .forEach(notif => {
                 const creator = users.find(u => u.id === notif.data?.userId);
                 const difference = notif.data.newQuantity - notif.data.oldQuantity;
