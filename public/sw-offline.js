@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lista-offline-v1';
+const CACHE_NAME = 'lista-offline-v2';
 const APP_SHELL = ['/', '/login', '/manifest.json'];
 
 self.addEventListener('install', event => {
@@ -28,23 +28,39 @@ self.addEventListener('fetch', event => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
-        .then(response => {
-          if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
+      (async () => {
+        try {
+          const response = await fetch(request);
+          if (response.ok) {
+            const cacheCopy = response.clone();
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(request, cacheCopy);
+          }
           return response;
-        })
-        .catch(async () => (await caches.match(request)) || (await caches.match('/')))
+        } catch {
+          return (await caches.match(request)) || (await caches.match('/'));
+        }
+      })()
     );
     return;
   }
 
   event.respondWith(
-    caches.match(request).then(cached => {
-      const network = fetch(request).then(response => {
-        if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
+    (async () => {
+      const cached = await caches.match(request);
+      if (cached) return cached;
+
+      try {
+        const response = await fetch(request);
+        if (response.ok) {
+          const cacheCopy = response.clone();
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(request, cacheCopy);
+        }
         return response;
-      }).catch(() => cached);
-      return cached || network;
-    })
+      } catch {
+        return new Response('', { status: 503, statusText: 'Service indisponible hors connexion' });
+      }
+    })()
   );
 });

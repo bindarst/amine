@@ -255,10 +255,10 @@ export default function ReportsPage() {
   const adjustments = React.useMemo(() => {
     if (!date?.from) return [];
     const fromDate = date.from;
-    const toDate = date.to ? addDays(date.to, 1) : addDays(new Date(), 1);
+    const toDateExclusive = date.to ? addDays(date.to, 1) : addDays(new Date(), 1);
     return allAdjustmentRecords.filter(adjustment => {
       const adjustmentDate = toDate(adjustment.date);
-      return adjustmentDate !== null && adjustmentDate >= fromDate && adjustmentDate < toDate;
+      return adjustmentDate !== null && adjustmentDate >= fromDate && adjustmentDate < toDateExclusive;
     });
   }, [allAdjustmentRecords, date]);
 

@@ -26,6 +26,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import ScanDeliveryDocument from '../components/scan-delivery-document';
+import type { IScannerControls } from '@zxing/browser';
+import { startBarcodeCamera } from '@/lib/barcode-camera';
 
 type DeliveryState = {
   [diaperId: string]: {
@@ -60,8 +62,7 @@ export default function NewDeliveryPage() {
   const [isBarcodeScanning, setIsBarcodeScanning] = React.useState(false);
   const [barcodeScannerError, setBarcodeScannerError] = React.useState('');
   const barcodeVideoRef = React.useRef<HTMLVideoElement | null>(null);
-  const barcodeStreamRef = React.useRef<MediaStream | null>(null);
-  const barcodeTimerRef = React.useRef<number | null>(null);
+  const barcodeScannerControlsRef = React.useRef<IScannerControls | null>(null);
 
   const touchStartRef = React.useRef<{ x: number, y: number, lastUpdatedX: number, target: SwipeTarget } | null>(null);
   const [activeSwipeTarget, setActiveSwipeTarget] = React.useState<string | null>(null);
@@ -84,12 +85,8 @@ export default function NewDeliveryPage() {
   }, [suppliers]);
 
   const stopBarcodeScanner = React.useCallback(() => {
-    if (barcodeTimerRef.current) {
-      window.clearInterval(barcodeTimerRef.current);
-      barcodeTimerRef.current = null;
-    }
-    barcodeStreamRef.current?.getTracks().forEach((track) => track.stop());
-    barcodeStreamRef.current = null;
+    barcodeScannerControlsRef.current?.stop();
+    barcodeScannerControlsRef.current = null;
     setIsBarcodeScanning(false);
   }, []);
 
@@ -124,40 +121,20 @@ export default function NewDeliveryPage() {
 
   const startBarcodeScanner = async () => {
     setBarcodeScannerError('');
-    if (!('BarcodeDetector' in window)) {
-      setBarcodeScannerError("Le scan camera n'est pas supporte par ce navigateur. Encodez le code manuellement.");
-      return;
-    }
-
+    setIsBarcodeScanning(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      barcodeStreamRef.current = stream;
-      setIsBarcodeScanning(true);
-
-      if (barcodeVideoRef.current) {
-        barcodeVideoRef.current.srcObject = stream;
-        await barcodeVideoRef.current.play();
-      }
-
-      const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-      const detector = new BarcodeDetectorCtor({
-        formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf'],
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      if (!barcodeVideoRef.current) throw new Error("Le lecteur camera n'a pas pu demarrer.");
+      barcodeScannerControlsRef.current = await startBarcodeCamera(barcodeVideoRef.current, (value) => {
+        barcodeScannerControlsRef.current = null;
+        setIsBarcodeScanning(false);
+        applyBarcode(value);
       });
-
-      barcodeTimerRef.current = window.setInterval(async () => {
-        if (!barcodeVideoRef.current) return;
-        const codes = await detector.detect(barcodeVideoRef.current);
-        if (codes.length > 0) {
-          const rawValue = String(codes[0].rawValue || '').trim();
-          if (rawValue) {
-            stopBarcodeScanner();
-            applyBarcode(rawValue);
-          }
-        }
-      }, 500);
     } catch (error) {
       console.error(error);
-      setBarcodeScannerError("Impossible d'ouvrir la camera. Verifiez l'autorisation camera ou encodez le code manuellement.");
+      setBarcodeScannerError(error instanceof Error
+        ? error.message
+        : "Impossible d'ouvrir la camera. Verifiez son autorisation ou encodez le code manuellement.");
       stopBarcodeScanner();
     }
   };
