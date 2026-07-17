@@ -57,7 +57,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
             });
             setFilteredNotifications(notificationsForUser);
 
-            if (typeof window !== 'undefined' && (window as any).ReactNativeWebView) {
+            if (
+                currentUserProfile.pushNotificationsEnabled &&
+                typeof window !== 'undefined' &&
+                (window as any).ReactNativeWebView
+            ) {
                 const unreadIds = new Set(notificationsForUser.filter(notif => !notif.read).map(notif => notif.id));
 
                 if (!hasInitializedNativeBridgeRef.current) {

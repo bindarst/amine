@@ -5,8 +5,43 @@ import { initializeFirebase } from '@/firebase';
 // Cette clé doit être générée dans la console Firebase > Project Settings > Cloud Messaging > Web Push certificates
 const VAPID_KEY = 'BN6vxiFlyuKnM1a4TvlPfO_5WYRw1rF3u1c2VNMZ_MXtx6FwZ7JIWxxXeAmbb1N2MDYZKflnyfaSNWdnQ2mh1nE';
 
+type NativeNotificationPermissionEvent = CustomEvent<{ granted?: boolean; token?: string }>;
+const NATIVE_NOTIFICATION_SENTINEL = 'lista-native-notifications-enabled';
+
+async function requestNativeNotificationPermission(): Promise<string | null> {
+    if (typeof window === 'undefined') return null;
+    const nativeBridge = (window as typeof window & {
+        ReactNativeWebView?: { postMessage: (message: string) => void };
+    }).ReactNativeWebView;
+    if (!nativeBridge) return null;
+
+    return new Promise(resolve => {
+        const handlePermission = (event: Event) => {
+            window.clearTimeout(timeout);
+            window.removeEventListener('lista-native-notification-permission', handlePermission as EventListener);
+            const detail = (event as NativeNotificationPermissionEvent).detail;
+            resolve(detail?.granted ? detail.token || NATIVE_NOTIFICATION_SENTINEL : null);
+        };
+        const timeout = window.setTimeout(() => {
+            window.removeEventListener('lista-native-notification-permission', handlePermission as EventListener);
+            resolve(null);
+        }, 15000);
+
+        window.addEventListener('lista-native-notification-permission', handlePermission as EventListener, { once: true });
+        nativeBridge.postMessage(JSON.stringify({ type: 'lista-request-notification-permission' }));
+    });
+}
+
+export function isNativeNotificationToken(token: string): boolean {
+    return token === NATIVE_NOTIFICATION_SENTINEL;
+}
+
 export async function requestNotificationPermission(userId: string) {
     try {
+        if (typeof window !== 'undefined' && (window as any).ReactNativeWebView) {
+            return await requestNativeNotificationPermission();
+        }
+
         const { messaging, firestore } = initializeFirebase();
         if (!messaging) {
             console.warn("Messaging not supported");

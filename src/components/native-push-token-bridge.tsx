@@ -5,6 +5,7 @@ import { arrayUnion, doc, setDoc } from 'firebase/firestore';
 import { useFirebase } from '@/firebase';
 
 type NativePushPayload = {
+  granted?: boolean;
   platform?: 'android' | 'ios' | 'web';
   type?: string;
   token?: string;
@@ -33,25 +34,30 @@ export function NativePushTokenBridge() {
 
   const saveNativeToken = React.useCallback(
     async (payload: NativePushPayload | null) => {
-      if (!user || !firestore || !payload?.token || !payload.type || !payload.platform) return;
-      if (lastSavedTokenRef.current === payload.token) return;
+      if (!user || !firestore || !payload || payload.granted === false) return;
+      if (payload.token && lastSavedTokenRef.current === payload.token) return;
 
-      lastSavedTokenRef.current = payload.token;
+      if (payload.token) lastSavedTokenRef.current = payload.token;
       const userRef = doc(firestore, 'users', user.uid);
+      const tokenFields = payload.token && payload.type && payload.platform
+        ? {
+            pushToken: payload.token,
+            nativePushTokens: arrayUnion({
+              platform: payload.platform,
+              type: payload.type,
+              token: payload.token,
+              deviceName: payload.deviceName ?? null,
+              source: payload.source ?? 'lista-native-app',
+              updatedAt: payload.updatedAt ?? new Date().toISOString(),
+            }),
+          }
+        : {};
       await setDoc(
         userRef,
         {
           pushNotificationsEnabled: true,
           nativePushEnabled: true,
-          pushToken: payload.token,
-          nativePushTokens: arrayUnion({
-            platform: payload.platform,
-            type: payload.type,
-            token: payload.token,
-            deviceName: payload.deviceName ?? null,
-            source: payload.source ?? 'lista-native-app',
-            updatedAt: payload.updatedAt ?? new Date().toISOString(),
-          }),
+          ...tokenFields,
         },
         { merge: true }
       );
@@ -70,7 +76,11 @@ export function NativePushTokenBridge() {
     };
 
     window.addEventListener('lista-native-push-token', handleNativePushToken);
-    return () => window.removeEventListener('lista-native-push-token', handleNativePushToken);
+    window.addEventListener('lista-native-notification-state', handleNativePushToken);
+    return () => {
+      window.removeEventListener('lista-native-push-token', handleNativePushToken);
+      window.removeEventListener('lista-native-notification-state', handleNativePushToken);
+    };
   }, [firestore, saveNativeToken, user]);
 
   return null;
